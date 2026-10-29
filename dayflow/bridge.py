@@ -105,9 +105,20 @@ SW_SHOW = 5
 SW_MINIMIZE = 6
 SW_RESTORE = 9
 
+GWL_STYLE = -16
+WS_MINIMIZEBOX = 0x00020000
+WS_SYSMENU = 0x00080000
+
 VK_LBUTTON = 0x01
 MIN_WIN_WIDTH = 360
 MIN_WIN_HEIGHT = 500
+
+# QQ 风格屏幕顶部贴边自动隐藏参数
+DOCK_TRIGGER_TOP_PX = 8       # 拖动到距屏幕顶部 <= 8px 时触发贴边吸附
+DOCK_RELEASE_TOP_PX = 16      # 拖离屏幕顶部 > 16px 时解除贴边吸附
+DOCK_PEEK_VISIBLE_PX = 5      # 贴边隐藏后在屏幕最顶端保留露出的感应高度 (px)
+DOCK_HOVER_MARGIN_PX = 6      # 鼠标移入/移出窗口矩形的容差边距 (px)
+DOCK_COLLAPSE_DELAY_SEC = 0.22  # 鼠标移出窗口后延迟多少秒开始平滑收起
 
 if os.name == "nt":
     # 使用独立 WinDLL("user32") 实例，避免修改全局 ctypes.windll.user32.SetWindowPos.argtypes
@@ -127,6 +138,16 @@ if os.name == "nt":
     _user32.ShowWindowAsync.restype = wintypes.BOOL
     _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     _user32.SetForegroundWindow.restype = wintypes.BOOL
+    _user32.GetForegroundWindow.argtypes = []
+    _user32.GetForegroundWindow.restype = wintypes.HWND
+    _user32.IsIconic.argtypes = [wintypes.HWND]
+    _user32.IsIconic.restype = wintypes.BOOL
+    _user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    _user32.IsWindowVisible.restype = wintypes.BOOL
+    _user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+    _user32.GetWindowLongW.restype = ctypes.c_long
+    _user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+    _user32.SetWindowLongW.restype = ctypes.c_long
     _user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
     _user32.GetCursorPos.restype = wintypes.BOOL
     _user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
@@ -154,6 +175,11 @@ class DayflowBridge:
         self._hwnd: int | None = None
         self.always_on_top: bool = False
         self._resizing: bool = False
+        self._style_patched: bool = False
+        self._docked_top: bool = False
+        self._dock_collapsed: bool = False
+        self._edge_monitor_stop = threading.Event()
+        self._edge_monitor_thread: threading.Thread | None = None
 
     def set_window_getter(self, window_getter: Callable[[], Any] | None) -> None:
         """设置或更新 PyWebView 窗口获取函数。"""
@@ -378,6 +404,211 @@ class DayflowBridge:
         """获取所有被用户屏蔽的软件列表。"""
         return self.db.get_ignored_apps()
 
+    def enable_taskbar_minimize_toggle(self, hwnd: int | None = None) -> bool:
+        """为无边框窗口补充 WS_MINIMIZEBOX | WS_SYSMENU 样式位，使点击底部任务栏图标支持『最小化 ↔ 恢复』双向切换。"""
+        target_hwnd = hwnd or self._resolve_hwnd(self._get_window())
+        if not target_hwnd or _user32 is None:
+            return False
+        try:
+            style = int(_user32.GetWindowLongW(target_hwnd, GWL_STYLE))
+            want_bits = WS_MINIMIZEBOX | WS_SYSMENU
+            if (style & want_bits) != want_bits:
+                _user32.SetWindowLongW(target_hwnd, GWL_STYLE, style | want_bits)
+            self._style_patched = True
+            return True
+        except Exception:
+            return False
+
+    def _slide_window_y(
+        self,
+        hwnd: int,
+        x: int,
+        start_y: int,
+        target_y: int,
+        topmost: bool,
+        steps: int = 5,
+    ) -> None:
+        """平滑滑动窗口 Y 坐标，用于 QQ 风格顶部贴边隐藏与鼠标移入滑出恢复。"""
+        if _user32 is None or not hwnd:
+            return
+        insert_after = HWND_TOPMOST if topmost else HWND_NOTOPMOST
+        flags = SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
+        if steps <= 1 or abs(target_y - start_y) <= 4:
+            _user32.SetWindowPos(hwnd, insert_after, x, target_y, 0, 0, flags)
+            return
+
+        for i in range(1, steps + 1):
+            # 采用缓出曲线 (ease-out) 让收起和弹出更灵动顺滑
+            ratio = 1.0 - (1.0 - i / steps) ** 2
+            cur_y = int(round(start_y + (target_y - start_y) * ratio))
+            _user32.SetWindowPos(hwnd, insert_after, x, cur_y, 0, 0, flags)
+            if i < steps:
+                time.sleep(0.01)
+
+    def collapse_to_top_dock(self, hwnd: int | None = None, animate: bool = True) -> bool:
+        """将已贴顶的窗口向上收起隐藏，仅在屏幕顶端保留 DOCK_PEEK_VISIBLE_PX 像素感应边缘。"""
+        target_hwnd = hwnd or self._resolve_hwnd(self._get_window())
+        if not target_hwnd or _user32 is None:
+            return False
+        rect = wintypes.RECT()
+        if not _user32.GetWindowRect(target_hwnd, ctypes.byref(rect)):
+            return False
+        height = max(MIN_WIN_HEIGHT, int(rect.bottom - rect.top))
+        target_y = -(height - DOCK_PEEK_VISIBLE_PX)
+        # 贴边隐藏时必须置为 TOPMOST，确保屏幕顶端 5px 感应条不会被最大化窗口遮挡
+        self._slide_window_y(
+            target_hwnd,
+            int(rect.left),
+            int(rect.top),
+            target_y,
+            topmost=True,
+            steps=5 if animate else 1,
+        )
+        self._docked_top = True
+        self._dock_collapsed = True
+        return True
+
+    def expand_from_top_dock(
+        self,
+        hwnd: int | None = None,
+        animate: bool = True,
+        activate: bool = False,
+    ) -> bool:
+        """将顶部贴边收起的窗口向下滑出恢复到 y=0 完整显示。"""
+        target_hwnd = hwnd or self._resolve_hwnd(self._get_window())
+        if not target_hwnd or _user32 is None:
+            return False
+        rect = wintypes.RECT()
+        if not _user32.GetWindowRect(target_hwnd, ctypes.byref(rect)):
+            return False
+        self._slide_window_y(
+            target_hwnd,
+            int(rect.left),
+            int(rect.top),
+            0,
+            topmost=True,
+            steps=5 if animate else 1,
+        )
+        self._dock_collapsed = False
+        if activate:
+            try:
+                _user32.SetForegroundWindow(target_hwnd)
+            except Exception:
+                pass
+        return True
+
+    def _edge_autohide_step(self, hwnd: int, outside_since: float | None) -> float | None:
+        """执行单步屏幕顶部贴边检测与自动隐藏/恢复状态转移（纯 Win32 无锁调用）。"""
+        if _user32 is None or not hwnd or self._resizing:
+            return None
+
+        if not self._style_patched:
+            self.enable_taskbar_minimize_toggle(hwnd)
+
+        # 若窗口当前最小化或隐藏，不触发贴边逻辑
+        if _user32.IsIconic(hwnd) or not _user32.IsWindowVisible(hwnd):
+            return None
+
+        # 检查鼠标左键是否正在按住（拖动窗口或点击控件中）
+        lbutton_down = (_user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0
+
+        rect = wintypes.RECT()
+        pt = wintypes.POINT()
+        if not _user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return outside_since
+        if not _user32.GetCursorPos(ctypes.byref(pt)):
+            return outside_since
+
+        left, top, right, bottom = int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)
+        mx, my = int(pt.x), int(pt.y)
+
+        # 状态 1：当前已处于顶部贴边收起隐藏状态 (_dock_collapsed == True)
+        if self._docked_top and self._dock_collapsed:
+            # 若窗口被外部恢复到了正常位置 (top >= 0)，同步修正状态
+            if top >= 0:
+                self._dock_collapsed = False
+                return None
+
+            # 当鼠标移动到屏幕顶端该窗口所在的水平范围时，立即向下滑出恢复界面！
+            in_x_range = (left - DOCK_HOVER_MARGIN_PX) <= mx <= (right + DOCK_HOVER_MARGIN_PX)
+            near_top_edge = my <= max(DOCK_TRIGGER_TOP_PX, bottom + DOCK_HOVER_MARGIN_PX)
+            if in_x_range and near_top_edge and not lbutton_down:
+                self.expand_from_top_dock(hwnd, animate=True, activate=False)
+                return None
+            return None
+
+        # 如果鼠标左键正按住（用户正在拖动窗口），暂不吸附也不收起，等松手再判定
+        if lbutton_down:
+            return None
+
+        # 状态 2：窗口当前未收起，检查是否刚刚被拖到屏幕上方边缘或被拖离上方边缘
+        if not self._docked_top:
+            if -20 <= top <= DOCK_TRIGGER_TOP_PX:
+                self._docked_top = True
+                if top != 0:
+                    flags = SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
+                    _user32.SetWindowPos(hwnd, HWND_TOPMOST, left, 0, 0, 0, flags)
+                return None
+        else:
+            # 原本处于顶部贴边模式，但用户已将窗口向下拖离屏幕顶部 -> 解除贴边模式
+            if top > DOCK_RELEASE_TOP_PX:
+                self._docked_top = False
+                self._dock_collapsed = False
+                if not self.always_on_top:
+                    flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
+                    _user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
+                return None
+
+        # 状态 3：窗口已贴在屏幕顶部 (_docked_top == True, _dock_collapsed == False)，检测鼠标是否移出窗口
+        if self._docked_top and not self._dock_collapsed:
+            inside_window = (
+                (left - DOCK_HOVER_MARGIN_PX) <= mx <= (right + DOCK_HOVER_MARGIN_PX)
+                and -4 <= my <= (bottom + DOCK_HOVER_MARGIN_PX)
+            )
+            if inside_window:
+                return None
+
+            now = time.monotonic()
+            if outside_since is None:
+                return now
+            if (now - outside_since) >= DOCK_COLLAPSE_DELAY_SEC:
+                self.collapse_to_top_dock(hwnd, animate=True)
+                return None
+            return outside_since
+
+        return None
+
+    def start_edge_autohide_monitor(self) -> None:
+        """启动后台守护线程：支持任务栏点击最小化切换 & QQ 风格顶部贴边自动隐藏与恢复。"""
+        if os.name != "nt" or _user32 is None:
+            return
+        if self._edge_monitor_thread is not None and self._edge_monitor_thread.is_alive():
+            return
+
+        self._edge_monitor_stop.clear()
+
+        def _monitor_loop() -> None:
+            outside_since: float | None = None
+            while not self._edge_monitor_stop.is_set():
+                try:
+                    hwnd = self._resolve_hwnd(self._get_window())
+                    if hwnd:
+                        outside_since = self._edge_autohide_step(hwnd, outside_since)
+                except Exception:
+                    pass
+                self._edge_monitor_stop.wait(0.035)
+
+        self._edge_monitor_thread = threading.Thread(
+            target=_monitor_loop,
+            name="DayflowEdgeAutoHide",
+            daemon=True,
+        )
+        self._edge_monitor_thread.start()
+
+    def stop_edge_autohide_monitor(self) -> None:
+        """停止顶部贴边自动隐藏监控线程。"""
+        self._edge_monitor_stop.set()
+
     def toggle_always_on_top(self, state: bool | None = None) -> dict:
         """切换或设置窗口置顶状态（采用原生 Win32 SetWindowPos + SWP_ASYNCWINDOWPOS 杜绝 WinForms TopMost 死锁）。"""
         self.always_on_top = (not self.always_on_top) if state is None else bool(state)
@@ -386,7 +617,8 @@ class DayflowBridge:
 
         if hwnd and _user32 is not None:
             try:
-                insert_after = HWND_TOPMOST if self.always_on_top else HWND_NOTOPMOST
+                want_top = self.always_on_top or self._docked_top
+                insert_after = HWND_TOPMOST if want_top else HWND_NOTOPMOST
                 flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
                 _user32.SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, flags)
             except Exception:
@@ -412,6 +644,7 @@ class DayflowBridge:
         hwnd = self._resolve_hwnd(win)
         if hwnd and _user32 is not None:
             try:
+                self.enable_taskbar_minimize_toggle(hwnd)
                 _user32.ShowWindowAsync(hwnd, SW_MINIMIZE)
                 return {"ok": True}
             except Exception:
@@ -443,15 +676,18 @@ class DayflowBridge:
         return {"ok": True, "hidden": True}
 
     def show_window(self) -> dict:
-        """从系统托盘唤醒并显示窗口（恢复置顶状态并激活至前台）。"""
+        """从最小化、系统托盘或顶部贴边隐藏状态唤醒并恢复显示窗口。"""
         win = self._get_window()
         hwnd = self._resolve_hwnd(win)
         if hwnd and _user32 is not None:
             try:
+                self.enable_taskbar_minimize_toggle(hwnd)
                 _user32.ShowWindowAsync(hwnd, SW_SHOW)
                 _user32.ShowWindowAsync(hwnd, SW_RESTORE)
+                if self._dock_collapsed:
+                    self.expand_from_top_dock(hwnd, animate=True, activate=False)
                 _user32.SetForegroundWindow(hwnd)
-                if self.always_on_top:
+                if self.always_on_top or self._docked_top:
                     flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
                     _user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags)
                 return {"ok": True, "hidden": False}
@@ -465,6 +701,21 @@ class DayflowBridge:
             except Exception:
                 pass
         return {"ok": True, "hidden": False}
+
+    def toggle_window(self) -> dict:
+        """切换窗口『恢复显示 ↔ 最小化』状态（供托盘图标左键点击调用）。"""
+        win = self._get_window()
+        hwnd = self._resolve_hwnd(win)
+        if hwnd and _user32 is not None:
+            try:
+                is_minimized = bool(_user32.IsIconic(hwnd))
+                is_visible = bool(_user32.IsWindowVisible(hwnd))
+                if not is_visible or is_minimized or self._dock_collapsed:
+                    return self.show_window()
+                return self.minimize_window()
+            except Exception:
+                pass
+        return self.show_window()
 
     def quit_app(self) -> dict:
         """立即隐藏窗口、保存当前正在进行的计时会话并直接退出结束整个程序（0延迟关闭）。"""

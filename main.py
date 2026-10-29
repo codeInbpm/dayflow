@@ -200,9 +200,11 @@ def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SE
     window_ref["win"] = win
 
     def _on_window_shown() -> None:
-        # 仅通过纯 Win32 EnumWindows 解析缓存 HWND，绝不在后台线程触碰 .NET WinForms 控件属性
+        # 仅通过纯 Win32 EnumWindows 解析缓存 HWND 并补充 WS_MINIMIZEBOX 样式位，支持任务栏点击『最小化 ↔ 恢复』
         try:
-            bridge._resolve_hwnd(win)
+            hwnd = bridge._resolve_hwnd(win)
+            if hwnd:
+                bridge.enable_taskbar_minimize_toggle(hwnd)
         except Exception:
             pass
 
@@ -216,6 +218,7 @@ def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SE
     def quit_app() -> None:
         # 立即隐藏主窗口，随后落盘关闭数据库并直接终止进程（不等待 1s 轮询线程 sleep 周期，实现毫秒级瞬时关闭）
         try:
+            bridge.stop_edge_autohide_monitor()
             bridge.hide_to_tray()
         except Exception:
             pass
@@ -237,7 +240,7 @@ def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SE
     bridge.set_on_quit(quit_app)
 
     tray = TrayController(
-        on_show=bridge.show_window,
+        on_show=bridge.toggle_window,
         on_toggle_top=bridge.toggle_always_on_top,
         is_on_top=lambda: bridge.always_on_top,
         on_quit=quit_app,
@@ -246,12 +249,14 @@ def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SE
 
     tracker.start()
     tray.start()
+    bridge.start_edge_autohide_monitor()
     try:
         webview.start(
             debug=dev_mode,
             icon=str(icon_file) if icon_file is not None else None,
         )
     finally:
+        bridge.stop_edge_autohide_monitor()
         tray.stop()
         tracker.stop()
         db.close()

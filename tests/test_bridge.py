@@ -253,3 +253,111 @@ def test_bridge_preferences_and_version(tmp_path):
     res_no_hwnd = bridge.start_window_resize("se")
     assert res_no_hwnd["ok"] is False
     db.close()
+
+
+def test_taskbar_minimize_toggle_and_qq_top_edge_autohide(tmp_path, monkeypatch):
+    import dayflow.bridge as bridge_mod
+
+    class FakeUser32:
+        def __init__(self):
+            self.style = 0x16010000
+            self.rect = [200, 2, 640, 782]  # left, top, right, bottom (440x780)
+            self.cursor = [300, 100]
+            self.lbutton = 0
+            self.iconic = False
+            self.visible = True
+
+        def GetWindowLongW(self, _hwnd, _idx):
+            return self.style
+
+        def SetWindowLongW(self, _hwnd, _idx, new_style):
+            self.style = int(new_style)
+            return self.style
+
+        def IsIconic(self, _hwnd):
+            return self.iconic
+
+        def IsWindowVisible(self, _hwnd):
+            return self.visible
+
+        def GetAsyncKeyState(self, _vk):
+            return self.lbutton
+
+        def GetWindowRect(self, _hwnd, rect_ptr):
+            rect_ptr._obj.left = self.rect[0]
+            rect_ptr._obj.top = self.rect[1]
+            rect_ptr._obj.right = self.rect[2]
+            rect_ptr._obj.bottom = self.rect[3]
+            return True
+
+        def GetCursorPos(self, pt_ptr):
+            pt_ptr._obj.x = self.cursor[0]
+            pt_ptr._obj.y = self.cursor[1]
+            return True
+
+        def SetWindowPos(self, _hwnd, _insert_after, x, y, _w, _h, flags):
+            if not (flags & bridge_mod.SWP_NOMOVE):
+                h = self.rect[3] - self.rect[1]
+                w = self.rect[2] - self.rect[0]
+                self.rect[0] = int(x)
+                self.rect[1] = int(y)
+                self.rect[2] = int(x) + w
+                self.rect[3] = int(y) + h
+            return True
+
+        def ShowWindowAsync(self, _hwnd, cmd):
+            if cmd == bridge_mod.SW_MINIMIZE:
+                self.iconic = True
+            elif cmd in (bridge_mod.SW_SHOW, bridge_mod.SW_RESTORE):
+                self.iconic = False
+                self.visible = True
+            return True
+
+        def SetForegroundWindow(self, _hwnd):
+            return True
+
+    fake_u32 = FakeUser32()
+    monkeypatch.setattr(bridge_mod, "_user32", fake_u32)
+
+    db = UsageDatabase(tmp_path / "bridge_autohide.db")
+    tracker = ForegroundTracker(db)
+    dummy_win = type("W", (), {"hwnd": 9999})()
+    bridge = DayflowBridge(db, tracker, window_getter=lambda: dummy_win)
+    bridge.set_hwnd(9999)
+
+    # 1. 验证任务栏最小化/恢复切换样式位注入及 toggle_window 双向切换
+    bridge.enable_taskbar_minimize_toggle(9999)
+    assert (fake_u32.style & bridge_mod.WS_MINIMIZEBOX) != 0
+    assert (fake_u32.style & bridge_mod.WS_SYSMENU) != 0
+
+    bridge.toggle_window()
+    assert fake_u32.iconic is True
+    bridge.toggle_window()
+    assert fake_u32.iconic is False
+
+    # 2. 窗口拖到屏幕顶部 (top=2) 松手 -> 自动对齐吸附 y=0 并进入 _docked_top 模式
+    outside_ts = bridge._edge_autohide_step(9999, None)
+    assert bridge._docked_top is True
+    assert bridge._dock_collapsed is False
+    assert fake_u32.rect[1] == 0
+
+    # 3. 鼠标移出窗口范围 (cursor=[900, 500]) 超过延迟后 -> 自动向上收起隐藏
+    fake_u32.cursor = [900, 500]
+    outside_ts = bridge._edge_autohide_step(9999, None)
+    assert outside_ts is not None
+    bridge._edge_autohide_step(9999, outside_ts - 1.0)
+    assert bridge._dock_collapsed is True
+    assert fake_u32.rect[1] == -(780 - bridge_mod.DOCK_PEEK_VISIBLE_PX)
+
+    # 4. 鼠标再次移动到屏幕上方窗口位置 (cursor=[350, 1]) -> 立即向下滑出恢复到 y=0
+    fake_u32.cursor = [350, 1]
+    bridge._edge_autohide_step(9999, None)
+    assert bridge._dock_collapsed is False
+    assert fake_u32.rect[1] == 0
+
+    # 5. 将窗口向下拖离屏幕顶部 (top=80) -> 自动解除顶部贴边隐藏
+    fake_u32.rect = [200, 80, 640, 860]
+    bridge._edge_autohide_step(9999, None)
+    assert bridge._docked_top is False
+    assert bridge._dock_collapsed is False
+    db.close()
