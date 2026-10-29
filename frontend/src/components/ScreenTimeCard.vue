@@ -143,6 +143,13 @@ const resolvedActiveApp = computed(
   () => props.activeApp || props.dashboard?.active_app || null
 )
 
+const isTodayPeriod = computed(() => {
+  return (
+    resolvedPeriod.value === 'day' &&
+    (!resolvedDateStr.value || resolvedDateStr.value === resolvedTodayStr.value)
+  )
+})
+
 // 日历加减辅助函数（当后端字段缺省时兜底计算）
 function shiftDateStr(baseStr, deltaDays) {
   if (!baseStr) return ''
@@ -420,62 +427,105 @@ function handleCategoryClick(catKey) {
     <!-- 累计使用总时长 (超大字号) + 环比对比 -->
     <div class="flex items-baseline justify-between gap-2 mb-3">
       <div>
-        <div class="text-[11px] text-zinc-400 mb-0.5 font-medium">
+        <div
+          class="text-[11.5px] font-semibold tracking-wide uppercase"
+          :class="isLight ? 'text-zinc-500' : 'text-zinc-400'"
+        >
           <template v-if="resolvedPeriod === 'week'">
             {{ t.weekTotalTitle }}
-            <span v-if="canGoNextDate" class="text-zinc-500">· {{ t.dailyAvg }} {{ formatDuration(resolvedDailyAvgSec) }}</span>
+            <span v-if="canGoNextDate" :class="isLight ? 'text-zinc-400' : 'text-zinc-500'">· {{ t.dailyAvg }} {{ formatDuration(resolvedDailyAvgSec) }}</span>
           </template>
           <template v-else-if="resolvedPeriod === 'month'">
             {{ t.monthTotalTitle }}
-            <span v-if="canGoNextDate" class="text-zinc-500">· {{ t.dailyAvg }} {{ formatDuration(resolvedDailyAvgSec) }}</span>
+            <span v-if="canGoNextDate" :class="isLight ? 'text-zinc-400' : 'text-zinc-500'">· {{ t.dailyAvg }} {{ formatDuration(resolvedDailyAvgSec) }}</span>
           </template>
           <template v-else>
             {{ t.screenTimeTitle }}
           </template>
         </div>
 
-        <div class="flex items-baseline flex-wrap gap-x-1.5">
+        <div class="flex items-baseline flex-wrap gap-x-1.5 mt-0.5">
           <template v-if="totalDurationParts.hours > 0">
-            <span class="text-[34px] leading-none font-bold tracking-tight text-zinc-100">
+            <span
+              class="text-[36px] leading-none font-bold tracking-tight"
+              :class="isLight ? 'text-zinc-900' : 'text-zinc-50'"
+            >
               {{ totalDurationParts.hours }}
             </span>
-            <span class="text-[18px] font-semibold text-zinc-300 mr-1">{{ t.unitHour }}</span>
+            <span
+              class="text-[13.5px] font-semibold mr-1.5"
+              :class="isLight ? 'text-zinc-500' : 'text-zinc-400'"
+            >
+              {{ t.unitHour }}
+            </span>
           </template>
 
           <template v-if="totalDurationParts.minutes > 0 || totalDurationParts.hours > 0">
-            <span class="text-[34px] leading-none font-bold tracking-tight text-zinc-100">
+            <span
+              class="text-[36px] leading-none font-bold tracking-tight"
+              :class="isLight ? 'text-zinc-900' : 'text-zinc-50'"
+            >
               {{ totalDurationParts.minutes }}
             </span>
-            <span class="text-[18px] font-semibold text-zinc-300">{{ t.unitMinute }}</span>
+            <span
+              class="text-[13.5px] font-semibold"
+              :class="isLight ? 'text-zinc-500' : 'text-zinc-400'"
+            >
+              {{ t.unitMinute }}
+            </span>
           </template>
 
           <template v-if="totalDurationParts.hours === 0 && totalDurationParts.minutes === 0">
-            <span class="text-[32px] leading-none font-bold tracking-tight text-zinc-100">
+            <span
+              class="text-[34px] leading-none font-bold tracking-tight"
+              :class="isLight ? 'text-zinc-900' : 'text-zinc-50'"
+            >
               {{ totalDurationParts.seconds }}
             </span>
-            <span class="text-[16px] font-semibold text-zinc-300">{{ t.unitSecond }}</span>
+            <span
+              class="text-[13.5px] font-semibold"
+              :class="isLight ? 'text-zinc-500' : 'text-zinc-400'"
+            >
+              {{ t.unitSecond }}
+            </span>
           </template>
         </div>
       </div>
 
-      <!-- 与昨日/上周/上月对比提示 -->
-      <div class="flex items-center gap-1 text-[11px] font-medium shrink-0">
+      <!-- 与昨日/上周/上月对比提示 / 全天实时采集状态徽章 -->
+      <div
+        class="inline-flex items-center gap-1.5 text-[11.5px] font-medium shrink-0 px-2.5 py-1 rounded-full transition-colors"
+        :class="
+          isLight
+            ? 'bg-black/[0.035] border border-black/[0.05]'
+            : 'bg-white/[0.04] border border-white/[0.06]'
+        "
+      >
+        <!-- 实时采集脉冲呼吸小绿点 -->
+        <span
+          v-if="periodDiffInfo.type === 'neutral' && isTodayPeriod"
+          class="relative flex h-2 w-2"
+        >
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+        </span>
         <TrendingUp
-          v-if="periodDiffInfo.type === 'up'"
+          v-else-if="periodDiffInfo.type === 'up'"
           class="w-3.5 h-3.5 text-amber-500"
         />
         <TrendingDown
           v-else-if="periodDiffInfo.type === 'down'"
           class="w-3.5 h-3.5 text-emerald-500"
         />
-        <Minus v-else class="w-3.5 h-3.5 text-zinc-500" />
+        <Minus v-else class="w-3 h-3 text-zinc-400" />
         <span
           :class="{
             'text-amber-600': isLight && periodDiffInfo.type === 'up',
-            'text-amber-300/90': !isLight && periodDiffInfo.type === 'up',
+            'text-amber-400': !isLight && periodDiffInfo.type === 'up',
             'text-emerald-600': isLight && periodDiffInfo.type === 'down',
-            'text-emerald-300/90': !isLight && periodDiffInfo.type === 'down',
-            'text-zinc-500': periodDiffInfo.type === 'neutral',
+            'text-emerald-400': !isLight && periodDiffInfo.type === 'down',
+            'text-zinc-600': isLight && periodDiffInfo.type === 'neutral',
+            'text-zinc-400': !isLight && periodDiffInfo.type === 'neutral',
           }"
         >
           {{ periodDiffInfo.text }}
@@ -495,7 +545,10 @@ function handleCategoryClick(catKey) {
     />
 
     <!-- 柱状图正下方：各大分类彩色标题与累计时长汇总行 -->
-    <div class="grid grid-cols-4 gap-1.5 mt-3.5 pt-3 border-t border-white/[0.06]">
+    <div
+      class="grid grid-cols-4 gap-1.5 mt-3.5 pt-3 border-t"
+      :class="isLight ? 'border-black/[0.06]' : 'border-white/[0.07]'"
+    >
       <button
         v-for="cat in mainCategories"
         :key="cat.key"
@@ -503,8 +556,12 @@ function handleCategoryClick(catKey) {
         class="group flex flex-col items-start rounded-xl px-2 py-1.5 text-left transition-all duration-150 border cursor-pointer"
         :class="
           selectedCategory === cat.key
-            ? 'bg-white/[0.08] border-white/[0.15] shadow-sm'
-            : 'bg-transparent border-transparent hover:bg-white/[0.04]'
+            ? isLight
+              ? 'bg-black/[0.06] border-black/[0.14] shadow-xs'
+              : 'bg-white/[0.09] border-white/[0.16] shadow-sm'
+            : isLight
+              ? 'bg-transparent border-transparent hover:bg-black/[0.035]'
+              : 'bg-transparent border-transparent hover:bg-white/[0.04]'
         "
         @click="handleCategoryClick(cat.key)"
       >
@@ -520,7 +577,10 @@ function handleCategoryClick(catKey) {
             {{ cat.label }}
           </span>
         </div>
-        <span class="text-[12px] font-medium text-zinc-300 mt-0.5 pl-2.5 whitespace-nowrap">
+        <span
+          class="text-[12px] font-medium mt-0.5 pl-2.5 whitespace-nowrap"
+          :class="isLight ? 'text-zinc-700' : 'text-zinc-300'"
+        >
           {{ formatDuration(cat.totalSec) }}
         </span>
       </button>

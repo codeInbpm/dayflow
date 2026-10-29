@@ -159,6 +159,9 @@ const normalizedBuckets = computed(() => {
   })
 })
 
+// 顶部留白比例：满刻度柱子高度占绘图区 85%，顶部预留 15% 呼吸空间，避免顶格
+const CHART_MAX_RATIO = 0.85
+
 function buildBucketItem({ index, hour, dateStr, title, shortLabel, raw, maxCap }) {
   const cats = raw.categories || {}
   const segments = []
@@ -181,10 +184,19 @@ function buildBucketItem({ index, hour, dateStr, title, shortLabel, raw, maxCap 
   const realTotal = Math.max(Number(raw.total_sec || 0), sumSec)
   const cappedTotal = Math.min(maxCap, realTotal)
   const scaleFactor = sumSec > maxCap ? maxCap / sumSec : 1
-  const scaledSegments = segments.map((seg) => ({
-    ...seg,
-    heightPct: Math.max(2.5, ((seg.sec * scaleFactor) / maxCap) * 100),
-  }))
+
+  // 计算整体柱子相对容器高度百分比（最高 CHART_MAX_RATIO * 100% = 85%）
+  const totalBarHeightPct = (cappedTotal / maxCap) * CHART_MAX_RATIO * 100
+
+  // 内部各段按各自所占比例分配
+  const scaledSegments = segments.map((seg) => {
+    const segShare = sumSec > 0 ? (seg.sec * scaleFactor) / sumSec : 0
+    return {
+      ...seg,
+      pctOfBar: Math.max(3, segShare * 100),
+      sharePct: Math.round(segShare * 100),
+    }
+  })
 
   return {
     index,
@@ -193,7 +205,8 @@ function buildBucketItem({ index, hour, dateStr, title, shortLabel, raw, maxCap 
     title,
     shortLabel,
     totalSec: realTotal,
-    totalPct: Math.min(100, (cappedTotal / maxCap) * 100),
+    hasData: realTotal > 0,
+    totalBarHeightPct: realTotal > 0 ? Math.max(4, totalBarHeightPct) : 0,
     segments: scaledSegments,
   }
 }
@@ -242,8 +255,7 @@ const xTicks = computed(() => {
     .map((b) => ({
       index: b.index,
       label: b.shortLabel,
-      leftPct: props.period === 'week' ? ((b.index + 0.5) / count) * 100 : (b.index / count) * 100,
-      centered: props.period === 'week',
+      leftPct: ((b.index + 0.5) / count) * 100,
     }))
 })
 
@@ -253,89 +265,116 @@ const gridColumnsStyle = computed(() => ({
 </script>
 
 <template>
-  <div class="relative select-none pt-2 pb-1">
-    <!-- 顶部悬停/选中时段明细浮动气泡 -->
+  <div class="relative select-none pt-1 pb-1">
+    <!-- 顶部悬停/选中时段明细浮动气泡 (现代化悬浮毛玻璃卡片) -->
     <transition
       enter-active-class="transition duration-150 ease-out"
-      enter-from-class="opacity-0 translate-y-1"
-      enter-to-class="opacity-100 translate-y-0"
+      enter-from-class="opacity-0 translate-y-1 scale-95"
+      enter-to-class="opacity-100 translate-y-0 scale-100"
       leave-active-class="transition duration-100 ease-in"
-      leave-from-class="opacity-100 translate-y-0"
-      leave-to-class="opacity-0 translate-y-1"
+      leave-from-class="opacity-100 translate-y-0 scale-100"
+      leave-to-class="opacity-0 translate-y-1 scale-95"
     >
       <div
         v-if="activeTooltipBucket"
-        class="pointer-events-none absolute -top-2 z-20 min-w-[172px] rounded-xl backdrop-blur-md border px-3 py-2"
+        class="pointer-events-none absolute -top-3 z-30 min-w-[188px] rounded-2xl backdrop-blur-xl border px-3.5 py-2.5 shadow-2xl transition-all duration-150"
         :class="
           isLight
-            ? 'bg-white/95 border-black/[0.09] shadow-lg'
-            : 'bg-[#22222B]/95 border-white/[0.12] shadow-floating'
+            ? 'bg-white/95 border-black/[0.08] shadow-zinc-300/60 text-zinc-900'
+            : 'bg-[#1e1e26]/95 border-white/[0.14] shadow-black/80 text-zinc-100'
         "
         :style="tooltipPositionStyle"
       >
-        <div class="flex items-center justify-between gap-3 border-b border-white/[0.07] pb-1 mb-1.5">
-          <span class="text-[11px] font-semibold text-zinc-200">
+        <div
+          class="flex items-center justify-between gap-3 pb-1.5 mb-1.5 border-b"
+          :class="isLight ? 'border-black/[0.06]' : 'border-white/[0.08]'"
+        >
+          <span
+            class="text-[12px] font-semibold tracking-tight"
+            :class="isLight ? 'text-zinc-800' : 'text-zinc-100'"
+          >
             {{ activeTooltipBucket.title }}
           </span>
-          <span class="text-[11px] font-medium text-blue-500">
+          <span class="text-[12px] font-bold text-blue-500 font-mono">
             {{ formatDuration(activeTooltipBucket.totalSec) }}
           </span>
         </div>
 
-        <div v-if="activeTooltipBucket.segments.length > 0" class="space-y-1">
+        <div v-if="activeTooltipBucket.segments.length > 0" class="space-y-1.5">
           <div
             v-for="seg in activeTooltipBucket.segments"
             :key="seg.key"
-            class="flex items-center justify-between text-[11px]"
+            class="flex items-center justify-between text-[11px] gap-2"
           >
-            <div class="flex items-center gap-1.5">
+            <div class="flex items-center gap-1.5 min-w-0">
               <span
-                class="w-2 h-2 rounded-full shrink-0"
+                class="w-2 h-2 rounded-full shrink-0 shadow-xs"
                 :style="{ backgroundColor: seg.color }"
               ></span>
-              <span class="text-zinc-300">{{ seg.label }}</span>
+              <span
+                class="truncate font-medium"
+                :class="isLight ? 'text-zinc-700' : 'text-zinc-300'"
+              >
+                {{ seg.label }}
+              </span>
             </div>
-            <span class="text-zinc-400 font-mono">
-              {{ formatDuration(seg.sec) }}
-            </span>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span class="text-[10px] text-zinc-400 font-medium">
+                {{ seg.sharePct }}%
+              </span>
+              <span
+                class="font-mono font-medium"
+                :class="isLight ? 'text-zinc-900' : 'text-zinc-200'"
+              >
+                {{ formatDuration(seg.sec) }}
+              </span>
+            </div>
           </div>
         </div>
-        <div v-else class="text-[11px] text-zinc-500 py-0.5">
+        <div
+          v-else
+          class="text-[11px] py-0.5 text-center font-medium"
+          :class="isLight ? 'text-zinc-400' : 'text-zinc-500'"
+        >
           {{ t.emptySlotRecord }}
         </div>
       </div>
     </transition>
 
     <!-- 图表主体：左侧柱状绘图区 + 右侧自适应 Y 轴刻度 -->
-    <div class="flex items-stretch gap-2">
-      <div class="relative flex-1 h-[132px]">
-        <!-- 背景水平参考线 -->
+    <div class="flex items-stretch gap-2.5">
+      <div class="relative flex-1 h-[142px]">
+        <!-- 背景水平参考线 (轻量柔和极简线条，彻底摒除纵向密集棋盘虚线) -->
         <div class="pointer-events-none absolute inset-0 flex flex-col justify-between">
-          <div class="border-t border-dashed border-white/[0.09] w-full"></div>
-          <div class="border-t border-dashed border-white/[0.07] w-full"></div>
-          <div class="border-t border-white/[0.12] w-full"></div>
-        </div>
-
-        <div class="pointer-events-none absolute inset-0">
+          <!-- 顶部参考线（1小时 / 满刻度线，距顶 15% 呼吸空间） -->
           <div
-            v-for="tick in xTicks"
-            :key="tick.index"
-            class="absolute top-0 bottom-0 border-l border-dashed border-white/[0.05]"
-            :style="{ left: `${tick.leftPct}%` }"
+            class="w-full border-t border-dashed"
+            :class="isLight ? 'border-black/[0.06]' : 'border-white/[0.07]'"
+            :style="{ marginTop: `${(1 - CHART_MAX_RATIO) * 100}%` }"
+          ></div>
+          <!-- 中部参考线（30分钟 / 半刻度线） -->
+          <div
+            class="w-full border-t border-dashed"
+            :class="isLight ? 'border-black/[0.04]' : 'border-white/[0.04]'"
+          ></div>
+          <!-- 底部基线（0刻度线） -->
+          <div
+            class="w-full border-t"
+            :class="isLight ? 'border-black/[0.08]' : 'border-white/[0.1]'"
           ></div>
         </div>
 
-        <!-- 分色圆角堆叠柱子 (按日24根 / 按周7根 / 按月30根) -->
+        <!-- 分色圆角胶囊柱子 (按日24根 / 按周7根 / 按月30根) -->
         <div
-          class="relative z-10 grid items-end h-full px-[2px]"
-          :class="period === 'week' ? 'gap-2.5 px-2' : 'gap-[3px]'"
+          class="relative z-10 grid items-end h-full px-1"
+          :class="period === 'week' ? 'gap-3 px-2' : period === 'month' ? 'gap-[2px]' : 'gap-[3.5px]'"
           :style="gridColumnsStyle"
         >
           <button
             v-for="bucket in normalizedBuckets"
             :key="bucket.index"
             type="button"
-            class="group relative flex flex-col justify-end items-center h-full w-full focus:outline-none cursor-pointer"
+            class="group relative flex flex-col justify-end items-center h-full w-full focus:outline-none cursor-pointer py-0"
             :title="
               period !== 'day' && bucket.dateStr
                 ? t.clickToViewDate.replace('{date}', bucket.dateStr)
@@ -345,74 +384,112 @@ const gridColumnsStyle = computed(() => ({
             @mouseleave="hoveredIndex = null"
             @click="handleBarClick(bucket)"
           >
+            <!-- 胶囊轨道总槽位 (Ghost Track Pillar)：无论是否有数据，全天始终呈现细腻的底轨胶囊轮廓 -->
             <div
-              class="w-full h-full flex flex-col-reverse justify-start overflow-hidden transition-all duration-150"
+              class="w-full h-full flex flex-col justify-end rounded-t-[5px] transition-all duration-200 relative overflow-hidden"
               :class="[
-                period === 'week' ? 'rounded-t-[6px] max-w-[26px]' : 'rounded-t-[4px]',
+                period === 'week' ? 'max-w-[28px]' : 'max-w-[18px]',
+                // 槽位底轨背景色 (浅色极淡米灰 / 深色极淡微光)
+                isLight ? 'bg-black/[0.035]' : 'bg-white/[0.04]',
+                // 选中或 Hover 态高亮反馈
                 period === 'day' && activeSelectedHour === bucket.index
-                  ? 'bg-white/[0.09] ring-1 ring-blue-400/60'
-                  : 'group-hover:bg-white/[0.05]',
-                period === 'day' && activeSelectedHour !== null && activeSelectedHour !== bucket.index
-                  ? 'opacity-45 group-hover:opacity-85'
-                  : 'opacity-100',
+                  ? isLight
+                    ? 'bg-blue-500/12 ring-1.5 ring-blue-500/60 shadow-xs'
+                    : 'bg-blue-500/15 ring-1.5 ring-blue-400/70 shadow-sm'
+                  : 'group-hover:bg-blue-500/8',
+                hoveredIndex !== null && hoveredIndex !== bucket.index ? 'opacity-60' : 'opacity-100',
               ]"
             >
-              <!-- 堆叠分类色块 -->
+              <!-- 真实彩色数据柱 (从底部向上平滑升起，顶部拥有自然柔和圆弧) -->
               <div
-                v-for="(seg, idx) in bucket.segments"
-                :key="seg.key"
-                class="w-full bar-segment-transition"
-                :class="[
-                  idx === bucket.segments.length - 1
-                    ? period === 'week'
-                      ? 'rounded-t-[5px]'
-                      : 'rounded-t-[3.5px]'
-                    : '',
-                  idx > 0 ? 'mb-[1px]' : '',
-                ]"
-                :style="{
-                  height: `${seg.heightPct}%`,
-                  backgroundColor: seg.color,
-                }"
-              ></div>
+                v-if="bucket.hasData"
+                class="w-full flex flex-col-reverse justify-start rounded-t-[4px] overflow-hidden bar-segment-transition"
+                :style="{ height: `${bucket.totalBarHeightPct}%` }"
+              >
+                <!-- 分类堆叠色块 (无缝贴合，纯净优雅) -->
+                <div
+                  v-for="seg in bucket.segments"
+                  :key="seg.key"
+                  class="w-full"
+                  :style="{
+                    height: `${seg.pctOfBar}%`,
+                    backgroundColor: seg.color,
+                  }"
+                ></div>
+              </div>
 
-              <!-- 空柱底线占位点 -->
+              <!-- 空柱底端极简微圆点 (当该时间段完全无使用记录时，点缀极淡小圆点避免空洞) -->
               <div
-                v-if="bucket.segments.length === 0"
-                class="w-full h-[2px] rounded-full bg-white/[0.05]"
-              ></div>
+                v-else
+                class="w-full flex items-center justify-center pb-1"
+              >
+                <div
+                  class="w-1 h-1 rounded-full"
+                  :class="isLight ? 'bg-black/10' : 'bg-white/10'"
+                ></div>
+              </div>
             </div>
           </button>
         </div>
       </div>
 
-      <!-- 右侧 Y 轴刻度标注 -->
-      <div class="flex flex-col justify-between text-[11px] text-zinc-500 font-medium leading-none py-0.5 shrink-0 w-11 text-right">
-        <span>{{ yAxisLabels.top }}</span>
-        <span>{{ yAxisLabels.mid }}</span>
-        <span>{{ yAxisLabels.bottom }}</span>
+      <!-- 右侧 Y 轴刻度标注 (与水平参考线精确对齐) -->
+      <div class="relative w-12 shrink-0 h-[142px] pointer-events-none text-right">
+        <!-- 顶刻度 (1小时) -->
+        <span
+          class="absolute right-0 text-[10.5px] font-medium tabular-nums transition-colors -translate-y-1/2 leading-none"
+          :class="isLight ? 'text-zinc-500 font-semibold' : 'text-zinc-400 font-semibold'"
+          :style="{ top: `${(1 - CHART_MAX_RATIO) * 100}%` }"
+        >
+          {{ yAxisLabels.top }}
+        </span>
+        <!-- 中刻度 (30分钟) -->
+        <span
+          class="absolute right-0 text-[10.5px] font-medium tabular-nums transition-colors -translate-y-1/2 leading-none"
+          :class="isLight ? 'text-zinc-400' : 'text-zinc-500'"
+          :style="{ top: `${((1 - CHART_MAX_RATIO) * 100 + 100) / 2}%` }"
+        >
+          {{ yAxisLabels.mid }}
+        </span>
+        <!-- 底刻度 (0) -->
+        <span
+          class="absolute right-0 bottom-0 text-[10.5px] font-medium tabular-nums transition-colors translate-y-1/2 leading-none"
+          :class="isLight ? 'text-zinc-400' : 'text-zinc-500'"
+        >
+          {{ yAxisLabels.bottom }}
+        </span>
       </div>
     </div>
 
-    <!-- 底部 X 轴时间刻度标注 -->
-    <div class="flex items-center gap-2 mt-1.5">
+    <!-- 底部 X 轴时间刻度标注 (精准居中对齐对应时间柱) -->
+    <div class="flex items-center gap-2.5 mt-2">
       <div class="relative flex-1 h-4">
-        <span
+        <div
           v-for="tick in xTicks"
           :key="tick.index"
-          class="absolute top-0 text-[11px] font-medium transition-colors duration-150 whitespace-nowrap"
-          :class="[
-            period === 'day' && activeSelectedHour === tick.index
-              ? 'text-blue-400 font-semibold'
-              : 'text-zinc-500',
-            tick.centered ? '-translate-x-1/2' : '',
-          ]"
+          class="absolute top-0 flex flex-col items-center -translate-x-1/2 transition-colors duration-150 whitespace-nowrap"
           :style="{ left: `${tick.leftPct}%` }"
         >
-          {{ tick.label }}
-        </span>
+          <span
+            class="text-[11px] font-medium transition-colors"
+            :class="[
+              period === 'day' && activeSelectedHour === tick.index
+                ? 'text-blue-500 font-bold'
+                : isLight
+                  ? 'text-zinc-500'
+                  : 'text-zinc-400',
+            ]"
+          >
+            {{ tick.label }}
+          </span>
+          <!-- 选中指示小蓝点 -->
+          <span
+            v-if="period === 'day' && activeSelectedHour === tick.index"
+            class="w-1 h-1 rounded-full bg-blue-500 mt-0.5"
+          ></span>
+        </div>
       </div>
-      <div class="w-11 shrink-0"></div>
+      <div class="w-12 shrink-0"></div>
     </div>
   </div>
 </template>

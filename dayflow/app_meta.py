@@ -24,7 +24,7 @@ CATEGORY_META: dict[str, dict] = {
     "creative": {"key": "creative", "label": "开发与创意", "color": "#06B6D4"},
     "entertainment": {"key": "entertainment", "label": "影音娱乐", "color": "#F59E0B"},
     "productivity": {"key": "productivity", "label": "办公与效率", "color": "#10B981"},
-    "other": {"key": "other", "label": "其他工具", "color": "#71717A"},
+    "other": {"key": "other", "label": "其他工具", "color": "#94A3B8"},
 }
 
 # 内置 70+ 款国内常用 Windows 软件词典：小写 exe 名 -> (友好显示名称, 分类)
