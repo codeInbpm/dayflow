@@ -65,6 +65,29 @@ def main() -> int:
         size_mb = exe_file.stat().st_size / (1024 * 1024)
         print(f"\n[Dayflow Build] SUCCESS! Standalone executable created:")
         print(f"  -> {exe_file} ({size_mb:.2f} MB)")
+
+        # 3. 自动生成便于微信/QQ直接分享的 ZIP 发行包（防止社交软件将 .exe 自动改名为 .exe1）
+        import zipfile
+
+        readme_text = (
+            "Dayflow 桌面时长管家 (v1.0.0 - Windows 绿色免安装版)\n"
+            "==================================================\n\n"
+            "【使用方法】\n"
+            "1. 将本压缩包解压到任意文件夹（建议放在 D 盘或常用软件目录）；\n"
+            "2. 直接双击运行 Dayflow.exe 即可开始自动记录桌面软件使用时长；\n"
+            "3. 所有统计数据均保存在同级自动生成的 data\\dayflow.db 本地数据库中，100% 本地隐私存储；\n"
+            "4. 点击右上角齿轮【设置】可切换深色/浅色模式、调节字体大小、切换语言或开启开机自启。\n"
+        )
+        readme_path = root_dir / "release" / "使用说明.txt"
+        readme_path.write_text(readme_text, encoding="utf-8")
+
+        zip_path = root_dir / "release" / "Dayflow-Windows-v1.0.0.zip"
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.write(exe_file, arcname="Dayflow/Dayflow.exe")
+            zf.write(readme_path, arcname="Dayflow/使用说明.txt")
+
+        zip_mb = zip_path.stat().st_size / (1024 * 1024)
+        print(f"  -> {zip_path} ({zip_mb:.2f} MB)")
         return 0
     return 1
 
