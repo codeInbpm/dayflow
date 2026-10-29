@@ -13,7 +13,7 @@ from typing import Any
 from dayflow.bridge import DayflowBridge
 from dayflow.database import UsageDatabase
 from dayflow.tracker import ForegroundTracker
-from dayflow.tray import TrayController
+from dayflow.tray import TrayController, create_tray_icon_image
 
 
 def get_resource_dir() -> Path:
@@ -48,9 +48,120 @@ def get_default_db_path() -> Path:
 BASE_DIR = get_resource_dir()
 DEFAULT_DB_PATH = get_default_db_path()
 DIST_INDEX_PATH = BASE_DIR / "frontend" / "dist" / "index.html"
+ICON_PATH = BASE_DIR / "assets" / "dayflow.ico"
 DEV_SERVER_URL = "http://localhost:5173"
 
 _SINGLE_INSTANCE_MUTEX = None
+_APP_HICONS: list[int] = []
+
+
+def ensure_app_icon_file() -> Path | None:
+    """确保 assets/dayflow.ico 存在，用于设置任务栏与窗口左上角图标。"""
+    if ICON_PATH.is_file():
+        return ICON_PATH
+    fallback_path = DEFAULT_DB_PATH.parent / "dayflow.ico"
+    if fallback_path.is_file():
+        return fallback_path
+    for candidate in (ICON_PATH, fallback_path):
+        try:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            img = create_tray_icon_image(256)
+            img.save(
+                candidate,
+                format="ICO",
+                sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+            )
+            return candidate
+        except Exception:
+            continue
+    return None
+
+
+def set_windows_app_user_model_id() -> None:
+    """设置独立 Windows AppUserModelID，避免任务栏将窗口归入 python.exe 并显示 Python 默认图标。"""
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "Dayflow.Desktop.TimeTracker.v1"
+        )
+    except Exception:
+        pass
+
+
+def apply_window_icon(win: Any, hwnd: int | None) -> None:
+    """为 WinForms 窗口与原生 Win32 HWND 同时绑定 Dayflow 专属图标（解决任务栏与最小化时显示 Python 图标问题）。"""
+    if sys.platform != "win32":
+        return
+    icon_file = ensure_app_icon_file()
+    if icon_file is None or not icon_file.is_file():
+        return
+
+    # 1. 设置 .NET WinForms Form.Icon
+    try:
+        native = getattr(win, "native", None)
+        if native is not None:
+            import System.Drawing  # type: ignore[import-not-found]
+
+            native.Icon = System.Drawing.Icon(str(icon_file))
+    except Exception:
+        pass
+
+    # 2. 通过 Win32 WM_SETICON 与 SetClassLongPtrW 强制刷新任务栏大小图标
+    if hwnd:
+        try:
+            import ctypes.wintypes as wintypes
+
+            user32 = ctypes.WinDLL("user32")
+            user32.LoadImageW.argtypes = [
+                wintypes.HINSTANCE,
+                wintypes.LPCWSTR,
+                wintypes.UINT,
+                ctypes.c_int,
+                ctypes.c_int,
+                wintypes.UINT,
+            ]
+            user32.LoadImageW.restype = wintypes.HANDLE
+            user32.SendMessageW.argtypes = [
+                wintypes.HWND,
+                wintypes.UINT,
+                wintypes.WPARAM,
+                wintypes.LPARAM,
+            ]
+            user32.SendMessageW.restype = wintypes.LPARAM
+
+            IMAGE_ICON = 1
+            LR_LOADFROMFILE = 0x0010
+            WM_SETICON = 0x0080
+            ICON_SMALL = 0
+            ICON_BIG = 1
+            GCLP_HICON = -14
+            GCLP_HICONSM = -34
+
+            hicon_big = user32.LoadImageW(
+                None, str(icon_file), IMAGE_ICON, 256, 256, LR_LOADFROMFILE
+            )
+            hicon_small = user32.LoadImageW(
+                None, str(icon_file), IMAGE_ICON, 32, 32, LR_LOADFROMFILE
+            )
+            if hicon_big:
+                _APP_HICONS.append(int(hicon_big))
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon_big)
+                if hasattr(user32, "SetClassLongPtrW"):
+                    user32.SetClassLongPtrW.argtypes = [
+                        wintypes.HWND,
+                        ctypes.c_int,
+                        wintypes.HANDLE,
+                    ]
+                    user32.SetClassLongPtrW.restype = wintypes.HANDLE
+                    user32.SetClassLongPtrW(hwnd, GCLP_HICON, hicon_big)
+            if hicon_small:
+                _APP_HICONS.append(int(hicon_small))
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_small)
+                if hasattr(user32, "SetClassLongPtrW"):
+                    user32.SetClassLongPtrW(hwnd, GCLP_HICONSM, hicon_small)
+        except Exception:
+            pass
 
 
 def ensure_single_instance() -> bool:
@@ -123,6 +234,7 @@ def run_smoke_test(db_path: Path, duration_sec: float = 2.0) -> int:
 
 def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SERVER_URL) -> int:
     """启动 Dayflow 后台采样守护线程、系统托盘与 PyWebView 桌面窗口。"""
+    set_windows_app_user_model_id()
     if not ensure_single_instance():
         return 0
 
@@ -162,14 +274,16 @@ def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SE
     window_ref["win"] = win
 
     def _on_window_shown() -> None:
+        hwnd_val: int | None = None
         try:
             native = getattr(win, "native", None)
             if native is not None and hasattr(native, "Handle"):
                 handle = native.Handle
-                hwnd = int(handle.ToInt32()) if hasattr(handle, "ToInt32") else int(handle)
-                bridge.set_hwnd(hwnd)
+                hwnd_val = int(handle.ToInt32()) if hasattr(handle, "ToInt32") else int(handle)
+                bridge.set_hwnd(hwnd_val)
         except Exception:
             pass
+        apply_window_icon(win, hwnd_val or bridge._resolve_hwnd(win))
 
     try:
         win.events.shown += _on_window_shown

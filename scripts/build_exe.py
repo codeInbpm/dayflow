@@ -51,6 +51,7 @@ def main() -> int:
         "--name=Dayflow",
         f"--icon={icon_path}",
         f"--add-data={dist_frontend};frontend/dist",
+        f"--add-data={icon_path};assets",
         "--exclude-module=pytest",
         "--exclude-module=unittest",
         f"--distpath={root_dir / 'release'}",
