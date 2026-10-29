@@ -11,7 +11,12 @@ import {
 } from 'lucide-vue-next'
 import HourlyBarChart from './HourlyBarChart.vue'
 import { CATEGORY_META, formatDuration } from '../api/bridge'
-import { i18n } from '../i18n'
+import {
+  i18n,
+  effectiveTheme,
+  formatPeriodBannerI18n,
+  getCategoryLabel,
+} from '../i18n'
 
 const props = defineProps({
   dashboard: {
@@ -81,6 +86,7 @@ const emit = defineEmits([
 ])
 
 const t = computed(() => i18n.value)
+const isLight = computed(() => effectiveTheme.value === 'light')
 
 const PERIOD_TABS = computed(() => [
   { key: 'day', label: t.value.periodDay },
@@ -176,24 +182,17 @@ const canGoNextDate = computed(() => {
   return Boolean(nextTargetDateStr.value)
 })
 
-// 格式化顶部日期/周期显示
+// 格式化顶部日期/周期显示（支持简体中文 / 繁體中文 / English 动态切换）
 const formattedDateBanner = computed(() => {
-  if (props.dashboard?.period_label) {
-    return props.dashboard.period_label
-  }
-  const raw = resolvedDateStr.value
-  if (!raw) return '今日'
-  const parts = raw.split('-')
-  const monthDay =
-    parts.length === 3 ? `${Number(parts[1])}月${Number(parts[2])}日` : raw
-
-  const matched = resolvedRecentDates.value.find((d) => d.date_str === raw)
-  if (matched) {
-    const tag = matched.label === '今日' || matched.label === '昨日' ? ` ${matched.label}` : ''
-    const wk = matched.weekday ? ` · ${matched.weekday}` : ''
-    return `${monthDay}${tag}${wk}`
-  }
-  return monthDay
+  return formatPeriodBannerI18n(
+    {
+      ...props.dashboard,
+      period: resolvedPeriod.value,
+      date_str: resolvedDateStr.value,
+      today_str: resolvedTodayStr.value,
+    },
+    resolvedDateStr.value
+  )
 })
 
 // 超大字号主时长拆分
@@ -206,9 +205,9 @@ const totalDurationParts = computed(() => {
 })
 
 const periodCompareNoun = computed(() => {
-  if (resolvedPeriod.value === 'week') return '上周'
-  if (resolvedPeriod.value === 'month') return '上月'
-  return '昨日'
+  if (resolvedPeriod.value === 'week') return t.value.compareLastWeek
+  if (resolvedPeriod.value === 'month') return t.value.compareLastMonth
+  return t.value.compareYesterday
 })
 
 // 与上一周期（昨日/上周/上月）对比文案
@@ -218,27 +217,31 @@ const periodDiffInfo = computed(() => {
   const noun = periodCompareNoun.value
   if (!prev || prev <= 0) {
     if (resolvedPeriod.value === 'day') {
-      return { type: 'neutral', text: '全天实时采集中' }
+      return { type: 'neutral', text: t.value.statusAllDayCollecting }
     }
     return {
       type: 'neutral',
-      text: `活跃 ${resolvedActiveDaysCount.value || 1} 天`,
+      text: `${t.value.activeDaysPrefix} ${resolvedActiveDaysCount.value || 1} ${t.value.activeDaysSuffix}`,
     }
   }
   const diff = current - prev
   const absDiff = Math.abs(diff)
   if (absDiff < 60) {
-    return { type: 'neutral', text: `与${noun}基本持平` }
+    return {
+      type: 'neutral',
+      text: t.value.compareSameAs.replace('{noun}', noun),
+    }
   }
+  const durStr = formatDuration(absDiff, { showSecondsWhenUnderMinute: false })
   if (diff > 0) {
     return {
       type: 'up',
-      text: `较${noun}多 ${formatDuration(absDiff, { showSecondsWhenUnderMinute: false })}`,
+      text: t.value.compareMoreThan.replace('{noun}', noun).replace('{dur}', durStr),
     }
   }
   return {
     type: 'down',
-    text: `较${noun}少 ${formatDuration(absDiff, { showSecondsWhenUnderMinute: false })}`,
+    text: t.value.compareLessThan.replace('{noun}', noun).replace('{dur}', durStr),
   }
 })
 
@@ -255,7 +258,7 @@ const mainCategories = computed(() => {
     const meta = resolvedCategoryMeta.value[key] || CATEGORY_META[key]
     return {
       key,
-      label: meta.label,
+      label: getCategoryLabel(key),
       color: meta.color,
       totalSec: totalMap.get(key) || 0,
     }
@@ -338,11 +341,12 @@ function handleCategoryClick(catKey) {
       <button
         v-if="resolvedPeriod === 'day' && selectedHour !== null && selectedHour !== undefined"
         type="button"
-        class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-[11px] font-medium text-blue-300 hover:bg-blue-500/25 transition-colors cursor-pointer"
+        class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-[11px] font-medium hover:bg-blue-500/25 transition-colors cursor-pointer"
+        :class="isLight ? 'text-blue-600' : 'text-blue-300'"
         @click="handleHourSelect(null)"
       >
         <FilterX class="w-3 h-3" />
-        <span>{{ selectedHour }}:00 时段 · 点击还原</span>
+        <span>{{ t.hourFilterBadge.replace('{hour}', String(selectedHour).padStart(2, '0')) }}</span>
       </button>
 
       <div
@@ -362,11 +366,11 @@ function handleCategoryClick(catKey) {
           class="flex items-center justify-center w-6 h-6 rounded-lg transition-colors"
           :class="
             canGoPrevDate
-              ? 'text-zinc-300 hover:bg-white/[0.08] hover:text-white cursor-pointer'
-              : 'text-zinc-600 cursor-not-allowed'
+              ? 'text-zinc-300 hover:bg-white/[0.08] hover:text-zinc-100 cursor-pointer'
+              : 'text-zinc-500/50 cursor-not-allowed'
           "
           :disabled="!canGoPrevDate"
-          :title="resolvedPeriod === 'week' ? '上一周' : resolvedPeriod === 'month' ? '上一月' : '前一天'"
+          :title="resolvedPeriod === 'week' ? t.prevWeekTitle : resolvedPeriod === 'month' ? t.prevMonthTitle : t.prevDayTitle"
           @click="handlePrevDate"
         >
           <ChevronLeft class="w-3.5 h-3.5" />
@@ -381,11 +385,11 @@ function handleCategoryClick(catKey) {
           class="flex items-center justify-center w-6 h-6 rounded-lg transition-colors"
           :class="
             canGoNextDate
-              ? 'text-zinc-300 hover:bg-white/[0.08] hover:text-white cursor-pointer'
-              : 'text-zinc-600 cursor-not-allowed'
+              ? 'text-zinc-300 hover:bg-white/[0.08] hover:text-zinc-100 cursor-pointer'
+              : 'text-zinc-500/50 cursor-not-allowed'
           "
           :disabled="!canGoNextDate"
-          :title="resolvedPeriod === 'week' ? '下一周' : resolvedPeriod === 'month' ? '下一月' : '后一天'"
+          :title="resolvedPeriod === 'week' ? t.nextWeekTitle : resolvedPeriod === 'month' ? t.nextMonthTitle : t.nextDayTitle"
           @click="handleNextDate"
         >
           <ChevronRight class="w-3.5 h-3.5" />
@@ -396,7 +400,8 @@ function handleCategoryClick(catKey) {
       <button
         v-if="canGoNextDate"
         type="button"
-        class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-[11px] font-medium text-blue-400 transition-colors cursor-pointer"
+        class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-[11px] font-medium transition-colors cursor-pointer"
+        :class="isLight ? 'text-blue-600' : 'text-blue-400'"
         @click="handleBackToToday"
       >
         <RotateCcw class="w-3 h-3" />
@@ -431,21 +436,21 @@ function handleCategoryClick(catKey) {
 
         <div class="flex items-baseline flex-wrap gap-x-1.5">
           <template v-if="totalDurationParts.hours > 0">
-            <span class="text-[34px] leading-none font-bold tracking-tight text-white">
+            <span class="text-[34px] leading-none font-bold tracking-tight text-zinc-100">
               {{ totalDurationParts.hours }}
             </span>
             <span class="text-[18px] font-semibold text-zinc-300 mr-1">{{ t.unitHour }}</span>
           </template>
 
           <template v-if="totalDurationParts.minutes > 0 || totalDurationParts.hours > 0">
-            <span class="text-[34px] leading-none font-bold tracking-tight text-white">
+            <span class="text-[34px] leading-none font-bold tracking-tight text-zinc-100">
               {{ totalDurationParts.minutes }}
             </span>
             <span class="text-[18px] font-semibold text-zinc-300">{{ t.unitMinute }}</span>
           </template>
 
           <template v-if="totalDurationParts.hours === 0 && totalDurationParts.minutes === 0">
-            <span class="text-[32px] leading-none font-bold tracking-tight text-white">
+            <span class="text-[32px] leading-none font-bold tracking-tight text-zinc-100">
               {{ totalDurationParts.seconds }}
             </span>
             <span class="text-[16px] font-semibold text-zinc-300">{{ t.unitSecond }}</span>
@@ -457,17 +462,19 @@ function handleCategoryClick(catKey) {
       <div class="flex items-center gap-1 text-[11px] font-medium shrink-0">
         <TrendingUp
           v-if="periodDiffInfo.type === 'up'"
-          class="w-3.5 h-3.5 text-amber-400"
+          class="w-3.5 h-3.5 text-amber-500"
         />
         <TrendingDown
           v-else-if="periodDiffInfo.type === 'down'"
-          class="w-3.5 h-3.5 text-emerald-400"
+          class="w-3.5 h-3.5 text-emerald-500"
         />
         <Minus v-else class="w-3.5 h-3.5 text-zinc-500" />
         <span
           :class="{
-            'text-amber-300/90': periodDiffInfo.type === 'up',
-            'text-emerald-300/90': periodDiffInfo.type === 'down',
+            'text-amber-600': isLight && periodDiffInfo.type === 'up',
+            'text-amber-300/90': !isLight && periodDiffInfo.type === 'up',
+            'text-emerald-600': isLight && periodDiffInfo.type === 'down',
+            'text-emerald-300/90': !isLight && periodDiffInfo.type === 'down',
             'text-zinc-500': periodDiffInfo.type === 'neutral',
           }"
         >

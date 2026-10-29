@@ -1,6 +1,7 @@
 /**
  * Dayflow 前后端桥接层 (PyWebView JS API + 浏览器高仿真 Windows 桌面软件 Mock 回退)
  */
+import { formatDurationI18n } from '../i18n'
 
 export const CATEGORY_META = {
   social: { key: 'social', label: '社交通讯', color: '#3B82F6' },
@@ -688,21 +689,8 @@ export async function startWindowResize(edge = 'se') {
 }
 
 /**
- * 将秒数格式化为中文人类可读时长（如 "12小时 28分钟"、"45分钟"、"32秒"）
+ * 将秒数格式化为当前所选语言的人类可读时长（如 "2小时 15分钟" / "2h 15m"）
  */
-export function formatDuration(seconds, { showSecondsWhenUnderMinute = true } = {}) {
-  const sec = Math.max(0, Math.floor(Number(seconds) || 0))
-  if (sec === 0) return '0分钟'
-  const hours = Math.floor(sec / 3600)
-  const minutes = Math.floor((sec % 3600) / 60)
-  if (hours > 0 && minutes > 0) {
-    return `${hours}小时 ${minutes}分钟`
-  }
-  if (hours > 0) {
-    return `${hours}小时`
-  }
-  if (minutes > 0) {
-    return `${minutes}分钟`
-  }
-  return showSecondsWhenUnderMinute ? `${sec}秒` : '不足1分钟'
+export function formatDuration(seconds, opts = {}) {
+  return formatDurationI18n(seconds, opts)
 }

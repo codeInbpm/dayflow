@@ -24,7 +24,14 @@ import {
   startWindowResize,
   formatDuration,
 } from './api/bridge'
-import { i18n, applyPreferencesToDom } from './i18n'
+import {
+  i18n,
+  effectiveTheme,
+  applyPreferencesToDom,
+  getCategoryLabel,
+  getLocalizedAppName,
+  formatPeriodBannerI18n,
+} from './i18n'
 
 const activeTab = ref('dashboard')
 const selectedDate = ref(null)
@@ -46,8 +53,20 @@ let pollTimer = null
 let mediaQueryList = null
 
 const t = computed(() => i18n.value)
+const isLight = computed(() => effectiveTheme.value === 'light')
 
 const categoryMeta = computed(() => dashboard.value?.category_meta || CATEGORY_META)
+
+const currentPeriodBanner = computed(() =>
+  formatPeriodBannerI18n(
+    {
+      ...dashboard.value,
+      period: selectedPeriod.value,
+      date_str: selectedDate.value || dashboard.value?.date_str || '',
+    },
+    selectedDate.value || ''
+  )
+)
 
 const categoryFilterPills = computed(() => {
   const list = [{ key: 'all', label: t.value.catAll, color: '#3B82F6' }]
@@ -56,7 +75,7 @@ const categoryFilterPills = computed(() => {
     if (meta) {
       list.push({
         key,
-        label: meta.label,
+        label: getCategoryLabel(key),
         color: meta.color,
       })
     }
@@ -93,7 +112,11 @@ const filteredTimeline = computed(() => {
 })
 
 function getCategoryInfo(catKey) {
-  return categoryMeta.value[catKey] || CATEGORY_META[catKey] || CATEGORY_META.other
+  const base = categoryMeta.value[catKey] || CATEGORY_META[catKey] || CATEGORY_META.other
+  return {
+    ...base,
+    label: getCategoryLabel(catKey),
+  }
 }
 
 async function loadData(
@@ -244,9 +267,9 @@ onUnmounted(() => {
       <template v-else-if="activeTab === 'ranking'">
         <div class="win-surface-card rounded-2xl px-4 py-3 flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <Calendar class="w-4 h-4 text-blue-400" />
+            <Calendar class="w-4 h-4 text-blue-500" />
             <span class="text-[12px] font-semibold text-zinc-200">
-              {{ dashboard.period_label || selectedDate || dashboard.date_str || '今日' }} · {{ t.rankingTitleSuffix }}
+              {{ currentPeriodBanner }} · {{ t.rankingTitleSuffix }}
             </span>
           </div>
           <div class="text-[12px] font-semibold text-blue-500">
@@ -272,9 +295,9 @@ onUnmounted(() => {
         <section class="win-surface-card rounded-2xl p-3.5 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-2">
-              <Clock3 class="w-4 h-4 text-blue-400" />
+              <Clock3 class="w-4 h-4 text-blue-500" />
               <h2 class="text-[13px] font-semibold text-zinc-100">
-                {{ t.timelineTitle }} ({{ dashboard.period_label || '今日' }})
+                {{ t.timelineTitle }} ({{ currentPeriodBanner }})
               </h2>
               <span class="px-1.5 py-0.5 rounded-md bg-white/[0.05] text-[11px] text-zinc-400">
                 {{ filteredTimeline.length }} {{ t.recordsSuffix }}
@@ -286,7 +309,7 @@ onUnmounted(() => {
               class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] text-[11px] font-medium text-zinc-300 transition-colors cursor-pointer"
               @click="timelineSortDesc = !timelineSortDesc"
             >
-              <ArrowUpDown class="w-3 h-3 text-blue-400" />
+              <ArrowUpDown class="w-3 h-3 text-blue-500" />
               <span>{{ timelineSortDesc ? t.sortNewest : t.sortChrono }}</span>
             </button>
           </div>
@@ -300,7 +323,9 @@ onUnmounted(() => {
               class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium whitespace-nowrap transition-all border shrink-0 cursor-pointer"
               :class="
                 selectedCategory === pill.key
-                  ? 'bg-white/[0.1] text-white border-white/[0.18]'
+                  ? isLight
+                    ? 'bg-blue-500/12 text-blue-600 border-blue-500/30 font-semibold'
+                    : 'bg-white/[0.1] text-white border-white/[0.18]'
                   : 'bg-white/[0.02] text-zinc-400 border-white/[0.04] hover:bg-white/[0.05] hover:text-zinc-200'
               "
               @click="selectedCategory = pill.key"
@@ -327,7 +352,7 @@ onUnmounted(() => {
               <img
                 v-if="record.icon_base64"
                 :src="record.icon_base64"
-                :alt="record.display_name"
+                :alt="getLocalizedAppName(record.display_name)"
                 class="w-9 h-9 rounded-[9px] object-contain bg-white/[0.04] p-0.5 border border-white/[0.06] shrink-0"
               />
               <div
@@ -335,7 +360,7 @@ onUnmounted(() => {
                 class="w-9 h-9 rounded-[9px] flex items-center justify-center text-[13px] font-bold text-white shrink-0"
                 :style="{ backgroundColor: getCategoryInfo(record.category).color }"
               >
-                {{ String(record.display_name || '?').slice(0, 1).toUpperCase() }}
+                {{ String(getLocalizedAppName(record.display_name) || '?').slice(0, 1).toUpperCase() }}
               </div>
 
               <!-- 中间：时间区间 + 软件名称 + 窗口标题 -->
@@ -343,15 +368,15 @@ onUnmounted(() => {
                 <div class="flex items-center gap-2">
                   <span
                     v-if="selectedPeriod !== 'day' && record.date_str"
-                    class="px-1.5 py-0.5 rounded bg-blue-500/15 text-[10.5px] font-mono text-blue-400 shrink-0"
+                    class="px-1.5 py-0.5 rounded bg-blue-500/15 text-[10.5px] font-mono text-blue-500 shrink-0"
                   >
                     {{ record.date_str.slice(5) }}
                   </span>
                   <span class="px-1.5 py-0.5 rounded bg-white/[0.06] text-[11px] font-mono font-semibold text-zinc-200 shrink-0">
                     {{ record.start_time }} - {{ record.end_time }}
                   </span>
-                  <span class="text-[12px] font-semibold text-white truncate">
-                    {{ record.display_name }}
+                  <span class="text-[12px] font-semibold text-zinc-100 truncate">
+                    {{ getLocalizedAppName(record.display_name) }}
                   </span>
                 </div>
                 <div class="flex items-center gap-1.5 mt-1 text-[11px] text-zinc-400 truncate">
@@ -414,19 +439,19 @@ onUnmounted(() => {
                 <img
                   v-if="app.icon_base64"
                   :src="app.icon_base64"
-                  :alt="app.display_name"
+                  :alt="getLocalizedAppName(app.display_name)"
                   class="w-9 h-9 rounded-[9px] object-contain bg-white/[0.04] p-0.5 border border-white/[0.06] shrink-0"
                 />
                 <div
                   v-else
-                  class="w-9 h-9 rounded-[9px] flex items-center justify-center text-[13px] font-bold text-white bg-zinc-700 shrink-0"
+                  class="w-9 h-9 rounded-[9px] flex items-center justify-center text-[13px] font-bold text-white bg-zinc-600 shrink-0"
                 >
-                  {{ String(app.display_name || '?').slice(0, 1).toUpperCase() }}
+                  {{ String(getLocalizedAppName(app.display_name) || '?').slice(0, 1).toUpperCase() }}
                 </div>
 
                 <div class="min-w-0">
                   <div class="text-[13px] font-semibold text-zinc-100 truncate">
-                    {{ app.display_name }}
+                    {{ getLocalizedAppName(app.display_name) }}
                   </div>
                   <div class="text-[11px] text-zinc-500 font-mono truncate">
                     {{ app.exe_name || app.exe_path }}
@@ -517,7 +542,7 @@ onUnmounted(() => {
     <!-- 右下角 (se) 带精致斜纹角标提示 -->
     <div
       class="fixed bottom-0 right-0 w-4 h-4 z-[61] cursor-nwse-resize flex items-end justify-end p-0.5 opacity-40 hover:opacity-90 transition-opacity"
-      title="按住拖动可调整窗口大小"
+      :title="t.resizeTip"
       @mousedown="handleResizeMouseDown('se', $event)"
     >
       <svg class="w-2.5 h-2.5 text-zinc-400 pointer-events-none" viewBox="0 0 10 10" fill="none">

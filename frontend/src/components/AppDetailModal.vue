@@ -8,6 +8,12 @@ import {
   updateAppSettings,
   formatDuration,
 } from '../api/bridge'
+import {
+  i18n,
+  effectiveTheme,
+  getCategoryLabel,
+  getLocalizedAppName,
+} from '../i18n'
 
 const props = defineProps({
   modelValue: {
@@ -47,6 +53,8 @@ const detail = ref(null)
 const loading = ref(false)
 const saving = ref(false)
 const hoveredHour = ref(null)
+const t = computed(() => i18n.value)
+const isLight = computed(() => effectiveTheme.value === 'light')
 
 const resolvedAppId = computed(() => {
   if (props.appId !== null && props.appId !== undefined) return Number(props.appId)
@@ -58,9 +66,10 @@ const resolvedAppId = computed(() => {
 const appData = computed(() => {
   const d = detail.value
   const init = props.initialApp || {}
+  const rawName = d?.display_name || init.display_name || init.exe_name || '未知应用'
   return {
     id: d?.id ?? init.id ?? init.app_id ?? resolvedAppId.value,
-    display_name: d?.display_name || init.display_name || init.exe_name || '未知应用',
+    display_name: getLocalizedAppName(rawName),
     exe_name: d?.exe_name || init.exe_name || '',
     exe_path: d?.exe_path || init.exe_path || '',
     category: d?.category || init.category || 'other',
@@ -94,7 +103,11 @@ const hourlyDistribution = computed(() => {
 
 const currentCategoryMeta = computed(() => {
   const cat = appData.value.category
-  return props.categoryMeta?.[cat] || CATEGORY_META[cat] || CATEGORY_META.other
+  const base = props.categoryMeta?.[cat] || CATEGORY_META[cat] || CATEGORY_META.other
+  return {
+    ...base,
+    label: getCategoryLabel(cat),
+  }
 })
 
 const categoryOptions = computed(() =>
@@ -102,7 +115,7 @@ const categoryOptions = computed(() =>
     const meta = props.categoryMeta?.[key] || CATEGORY_META[key]
     return {
       key,
-      label: meta.label,
+      label: getCategoryLabel(key),
       color: meta.color,
     }
   })
@@ -198,14 +211,27 @@ defineExpose({
   >
     <div
       v-if="isOpen"
-      class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/65 backdrop-blur-sm p-2.5"
+      class="fixed inset-0 z-50 flex items-end sm:items-center justify-center backdrop-blur-sm p-2.5"
+      :class="isLight ? 'bg-black/35' : 'bg-black/65'"
       @click.self="closeModal"
     >
       <div
-        class="w-full max-w-[412px] max-h-[88vh] flex flex-col rounded-2xl bg-[#1A1A22] border border-white/[0.1] shadow-2xl overflow-hidden"
+        class="w-full max-w-[412px] max-h-[88vh] flex flex-col rounded-2xl border shadow-2xl overflow-hidden transition-colors"
+        :class="
+          isLight
+            ? 'bg-white border-black/[0.08] text-zinc-800'
+            : 'bg-[#1A1A22] border-white/[0.1] text-zinc-100'
+        "
       >
         <!-- 顶部：软件图标、名称、总时长与关闭按钮 -->
-        <div class="flex items-start justify-between gap-3 p-4 border-b border-white/[0.07] bg-[#20202A]">
+        <div
+          class="flex items-start justify-between gap-3 p-4 border-b transition-colors"
+          :class="
+            isLight
+              ? 'bg-[#F7F7FA] border-black/[0.06]'
+              : 'bg-[#20202A] border-white/[0.07]'
+          "
+        >
           <div class="flex items-center gap-3 min-w-0">
             <div class="relative w-11 h-11 shrink-0">
               <img
@@ -224,7 +250,8 @@ defineExpose({
 
               <span
                 v-if="isCurrentlyActive"
-                class="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#20202A]"
+                class="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full"
+                :class="isLight ? 'bg-[#F7F7FA]' : 'bg-[#20202A]'"
               >
                 <span class="animate-ping absolute inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 opacity-75"></span>
                 <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
@@ -233,14 +260,15 @@ defineExpose({
 
             <div class="min-w-0">
               <div class="flex items-center gap-2">
-                <h3 class="text-[15px] font-bold text-white truncate">
+                <h3 class="text-[15px] font-bold text-zinc-100 truncate">
                   {{ appData.display_name }}
                 </h3>
                 <span
                   v-if="isCurrentlyActive"
-                  class="px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-medium text-emerald-300 shrink-0"
+                  class="px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-medium shrink-0"
+                  :class="isLight ? 'text-emerald-600' : 'text-emerald-300'"
                 >
-                  前台运行中
+                  {{ t.runningForeground }}
                 </span>
               </div>
               <p class="text-[11px] text-zinc-400 font-mono truncate mt-0.5">
@@ -248,11 +276,11 @@ defineExpose({
               </p>
               <div class="flex items-center gap-2 mt-1 text-[12px]">
                 <span class="font-semibold text-zinc-100">
-                  今日累计 {{ formatDuration(appData.total_sec) }}
+                  {{ t.todayTotalPrefix }} {{ formatDuration(appData.total_sec) }}
                 </span>
-                <span class="text-zinc-600">·</span>
+                <span class="text-zinc-500">·</span>
                 <span class="text-zinc-400">
-                  共 {{ sessions.length }} 个时间段
+                  {{ t.sessionsCountText.replace('{n}', String(sessions.length)) }}
                 </span>
               </div>
             </div>
@@ -260,8 +288,8 @@ defineExpose({
 
           <button
             type="button"
-            class="flex items-center justify-center w-7 h-7 rounded-lg text-zinc-400 hover:bg-white/[0.08] hover:text-white transition-colors shrink-0"
-            title="关闭详情"
+            class="flex items-center justify-center w-7 h-7 rounded-lg text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-100 transition-colors shrink-0 cursor-pointer"
+            :title="t.closeDetail"
             @click="closeModal"
           >
             <X class="w-4 h-4" />
@@ -271,18 +299,25 @@ defineExpose({
         <!-- 主体滚动区 -->
         <div class="flex-1 overflow-y-auto p-4 space-y-4">
           <!-- 1. 该软件专属 24 小时使用分布迷你柱状图 -->
-          <div class="rounded-xl bg-[#15151B] border border-white/[0.06] p-3">
+          <div
+            class="rounded-xl border p-3 transition-colors"
+            :class="
+              isLight
+                ? 'bg-[#F5F5F9] border-black/[0.06]'
+                : 'bg-[#15151B] border-white/[0.06]'
+            "
+          >
             <div class="flex items-center justify-between mb-2">
               <div class="flex items-center gap-1.5 text-[12px] font-semibold text-zinc-200">
                 <Activity class="w-3.5 h-3.5" :style="{ color: currentCategoryMeta.color }" />
-                <span>24小时使用分布</span>
+                <span>{{ t.dist24hTitle }}</span>
               </div>
               <span class="text-[11px] text-zinc-400 font-mono">
                 <template v-if="hoveredHour !== null">
                   {{ String(hoveredHour).padStart(2, '0') }}:00 · {{ formatDuration(hourlyDistribution[hoveredHour]?.sec || 0) }}
                 </template>
                 <template v-else>
-                  悬停查看各小时时长
+                  {{ t.hoverToViewHour }}
                 </template>
               </span>
             </div>
@@ -318,28 +353,39 @@ defineExpose({
           </div>
 
           <!-- 2. 软件分类归属与屏蔽设置 -->
-          <div class="rounded-xl bg-[#15151B] border border-white/[0.06] p-3 space-y-2.5">
+          <div
+            class="rounded-xl border p-3 space-y-2.5 transition-colors"
+            :class="
+              isLight
+                ? 'bg-[#F5F5F9] border-black/[0.06]'
+                : 'bg-[#15151B] border-white/[0.06]'
+            "
+          >
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-1.5 text-[12px] font-semibold text-zinc-200">
                 <Tag class="w-3.5 h-3.5 text-zinc-400" />
-                <span>软件分类归属</span>
+                <span>{{ t.appCategoryTitle }}</span>
               </div>
 
               <!-- 屏蔽此软件开关 -->
               <button
                 type="button"
-                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors border"
+                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors border cursor-pointer"
                 :class="
                   appData.is_ignored
-                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'
-                    : 'bg-rose-500/10 text-rose-300 border-rose-500/25 hover:bg-rose-500/20'
+                    ? isLight
+                      ? 'bg-emerald-500/15 text-emerald-700 border-emerald-500/30 hover:bg-emerald-500/25'
+                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'
+                    : isLight
+                      ? 'bg-rose-500/10 text-rose-600 border-rose-500/25 hover:bg-rose-500/20'
+                      : 'bg-rose-500/10 text-rose-300 border-rose-500/25 hover:bg-rose-500/20'
                 "
                 :disabled="saving"
                 @click="handleToggleIgnore"
               >
                 <Eye v-if="appData.is_ignored" class="w-3 h-3" />
                 <EyeOff v-else class="w-3 h-3" />
-                <span>{{ appData.is_ignored ? '恢复计入统计' : '屏蔽此软件' }}</span>
+                <span>{{ appData.is_ignored ? t.btnRestoreApp : t.btnIgnoreApp }}</span>
               </button>
             </div>
 
@@ -348,11 +394,15 @@ defineExpose({
                 v-for="cat in categoryOptions"
                 :key="cat.key"
                 type="button"
-                class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 border"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer"
                 :class="
                   appData.category === cat.key
-                    ? 'bg-white/[0.12] text-white border-white/[0.25] shadow-sm'
-                    : 'bg-white/[0.03] text-zinc-400 border-white/[0.05] hover:bg-white/[0.07] hover:text-zinc-200'
+                    ? isLight
+                      ? 'bg-white text-zinc-900 border-blue-500/40 font-semibold shadow-sm'
+                      : 'bg-white/[0.12] text-white border-white/[0.25] shadow-sm'
+                    : isLight
+                      ? 'bg-white/70 text-zinc-600 border-black/[0.06] hover:bg-white hover:text-zinc-900'
+                      : 'bg-white/[0.03] text-zinc-400 border-white/[0.05] hover:bg-white/[0.07] hover:text-zinc-200'
                 "
                 :disabled="saving"
                 @click="handleSelectCategory(cat.key)"
@@ -370,11 +420,11 @@ defineExpose({
           <div class="space-y-2">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-1.5 text-[12px] font-semibold text-zinc-200">
-                <Clock3 class="w-3.5 h-3.5 text-blue-400" />
-                <span>使用时间段流水明细</span>
+                <Clock3 class="w-3.5 h-3.5 text-blue-500" />
+                <span>{{ t.sessionListTitle }}</span>
               </div>
               <span class="text-[11px] text-zinc-500">
-                按时间排列
+                {{ t.orderByTime }}
               </span>
             </div>
 
@@ -382,7 +432,12 @@ defineExpose({
               <div
                 v-for="s in sessions"
                 :key="s.id"
-                class="flex items-center justify-between gap-2.5 p-2.5 rounded-xl bg-[#15151B] border border-white/[0.05] hover:border-white/[0.1] transition-colors"
+                class="flex items-center justify-between gap-2.5 p-2.5 rounded-xl border transition-colors"
+                :class="
+                  isLight
+                    ? 'bg-[#F5F5F9] border-black/[0.06] hover:border-black/[0.12]'
+                    : 'bg-[#15151B] border-white/[0.05] hover:border-white/[0.1]'
+                "
               >
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
@@ -392,7 +447,7 @@ defineExpose({
                       {{ s.start_time }} - {{ s.end_time }}
                     </span>
                     <span class="text-[11px] text-zinc-500">
-                      {{ s.hour_bucket }}时
+                      {{ t.xAxisHour.replace('{h}', String(s.hour_bucket)) }}
                     </span>
                   </div>
                   <div class="flex items-center gap-1.5 mt-1 text-[11px] text-zinc-400 truncate">
@@ -419,9 +474,14 @@ defineExpose({
 
             <div
               v-else
-              class="py-6 text-center rounded-xl bg-[#15151B] border border-dashed border-white/[0.06] text-[12px] text-zinc-500"
+              class="py-6 text-center rounded-xl border border-dashed text-[12px] text-zinc-500"
+              :class="
+                isLight
+                  ? 'bg-[#F5F5F9] border-black/[0.08]'
+                  : 'bg-[#15151B] border-white/[0.06]'
+              "
             >
-              当日暂无该软件的分段会话流水记录
+              {{ t.emptyAppSessions }}
             </div>
           </div>
         </div>

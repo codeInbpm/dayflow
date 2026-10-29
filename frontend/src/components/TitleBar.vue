@@ -11,7 +11,7 @@ import {
   EyeOff,
 } from 'lucide-vue-next'
 import { toggleAlwaysOnTop, minimizeWindow, quitApp } from '../api/bridge'
-import { i18n } from '../i18n'
+import { i18n, effectiveTheme, getLocalizedAppName } from '../i18n'
 
 const props = defineProps({
   activeTab: {
@@ -50,6 +50,7 @@ const emit = defineEmits([
 
 const isPinned = ref(props.alwaysOnTop)
 const t = computed(() => i18n.value)
+const isLight = computed(() => effectiveTheme.value === 'light')
 
 watch(
   () => props.alwaysOnTop,
@@ -150,14 +151,14 @@ function handleDragPointerUp(e) {
         <div
           v-if="activeApp && activeApp.display_name"
           class="ml-1 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 max-w-[150px]"
-          :title="`${t.recording}: ${activeApp.display_name}`"
+          :title="`${t.recording}: ${getLocalizedAppName(activeApp.display_name)}`"
         >
           <span class="relative flex h-1.5 w-1.5 shrink-0">
             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             <span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
           </span>
           <span class="text-[11px] text-emerald-500 font-medium truncate">
-            {{ activeApp.display_name }}
+            {{ getLocalizedAppName(activeApp.display_name) }}
           </span>
         </div>
       </div>
@@ -180,7 +181,7 @@ function handleDragPointerUp(e) {
           class="group relative flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-150 border cursor-pointer"
           :class="
             isPinned
-              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+              ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
               : 'bg-transparent text-zinc-400 border-transparent hover:bg-white/[0.07] hover:text-zinc-200'
           "
           :title="isPinned ? t.pinActive : t.pinInactive"
@@ -243,8 +244,10 @@ function handleDragPointerUp(e) {
             class="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] leading-tight font-semibold"
             :class="
               currentTab === 'ignored'
-                ? 'bg-blue-500/25 text-blue-400'
-                : 'bg-zinc-700/70 text-zinc-300'
+                ? 'bg-blue-500/20 text-blue-500'
+                : isLight
+                  ? 'bg-black/[0.07] text-zinc-600'
+                  : 'bg-zinc-700/70 text-zinc-300'
             "
           >
             {{ ignoredCount }}

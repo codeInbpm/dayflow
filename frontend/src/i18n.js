@@ -11,6 +11,64 @@ export const appPreferences = reactive({
 // 6 档字体大小刻度（对应微信设置图1：第1格“小”，第2格“标准”，第6格“大”）
 export const FONT_SCALE_STEPS = [0.92, 1.0, 1.05, 1.1, 1.15, 1.2]
 
+// 常见中文软件名在英文/繁体模式下的本地化映射
+const APP_NAME_EN_MAP = {
+  文件资源管理器: 'File Explorer',
+  任务管理器: 'Task Manager',
+  微信: 'WeChat',
+  企业微信: 'WeCom',
+  钉钉: 'DingTalk',
+  飞书: 'Feishu / Lark',
+  抖音: 'Douyin',
+  哔哩哔哩: 'Bilibili',
+  网易云音乐: 'NetEase Music',
+  QQ音乐: 'QQ Music',
+  酷狗音乐: 'Kugou Music',
+  百度网盘: 'Baidu Netdisk',
+  阿里云盘: 'Alipan',
+  迅雷: 'Thunder',
+  剪映专业版: 'CapCut Pro',
+  有道词典: 'Youdao Dict',
+  有道云笔记: 'Youdao Note',
+  印象笔记: 'Evernote',
+  小智桌面: 'Xiaozhi Desktop',
+  'Windows 终端': 'Windows Terminal',
+  命令提示符: 'Command Prompt',
+  画图: 'Paint',
+  记事本: 'Notepad',
+  计算器: 'Calculator',
+  截图工具: 'Snipping Tool',
+  设置: 'Windows Settings',
+  未知应用: 'Unknown App',
+}
+
+const APP_NAME_TW_MAP = {
+  文件资源管理器: '檔案總管',
+  任务管理器: '工作管理員',
+  企业微信: '企業微信',
+  钉钉: '釘釘',
+  飞书: '飛書',
+  哔哩哔哩: '嗶哩嗶哩',
+  网易云音乐: '網易雲音樂',
+  QQ音乐: 'QQ音樂',
+  酷狗音乐: '酷狗音樂',
+  百度网盘: '百度網盤',
+  阿里云盘: '阿里雲盤',
+  迅雷: '迅雷',
+  剪映专业版: '剪映專業版',
+  有道词典: '有道詞典',
+  有道云笔记: '有道雲筆記',
+  印象笔记: 'Evernote',
+  'Windows 终端': 'Windows 終端機',
+  命令提示符: '命令提示字元',
+  画图: '小畫家',
+  记事本: '記事本',
+  计算器: '小算盤',
+  截图工具: '剪取工具',
+  设置: '設定',
+  未知应用: '未知應用',
+}
+
 const MESSAGES = {
   'zh-CN': {
     appSubTitle: '桌面时长管家',
@@ -27,8 +85,29 @@ const MESSAGES = {
     periodDay: '每日',
     periodWeek: '每周',
     periodMonth: '每月',
+    prevDayTitle: '前一天',
+    nextDayTitle: '后一天',
+    prevWeekTitle: '上一周',
+    nextWeekTitle: '下一周',
+    prevMonthTitle: '上一月',
+    nextMonthTitle: '下一月',
+    todayTag: '今日',
+    yesterdayTag: '昨日',
+    thisWeekTag: '本周',
+    thisMonthTag: '本月',
+    weekdays: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
     statusCollecting: '实时采集中',
     statusReady: '后台就绪',
+    statusAllDayCollecting: '全天实时采集中',
+    activeDaysPrefix: '活跃',
+    activeDaysSuffix: '天',
+    compareYesterday: '昨日',
+    compareLastWeek: '上周',
+    compareLastMonth: '上月',
+    compareSameAs: '与{noun}基本持平',
+    compareMoreThan: '较{noun}多 {dur}',
+    compareLessThan: '较{noun}少 {dur}',
+    hourFilterBadge: '{hour}:00 时段 · 点击还原',
     backToToday: '回到今日',
     backToWeek: '回到本周',
     backToMonth: '回到本月',
@@ -41,10 +120,32 @@ const MESSAGES = {
     unitSecond: '秒',
     catAll: '全部',
     catSocial: '社交通讯',
-    catCreative: '创意与开发',
+    catCreative: '开发与创意',
     catEntertainment: '影音娱乐',
     catProductivity: '办公与效率',
-    catOther: '其他',
+    catOther: '其他工具',
+    // 图表
+    yAxis1Hour: '1小时',
+    yAxis30Min: '30分钟',
+    yAxisHours: '{h}小时',
+    xAxisHour: '{h}时',
+    xAxisDay: '{d}日',
+    emptySlotRecord: '该时段暂无软件使用记录',
+    clickToViewDate: '点击查看 {date} 当日明细',
+    // 软件使用明细网格 (AppUsageGrid)
+    appGridTitle: '软件使用明细',
+    appGridHourTitle: '{hour}:00 时段使用明细',
+    appCountSuffix: '款',
+    btnAllDay: '全天',
+    viewGrid: '双列',
+    viewGridTip: '双列磁贴视图',
+    viewList: '排行',
+    viewListTip: '单列进度条排行视图',
+    activeInForeground: '当前正在前台使用',
+    emptyHourApps: '该时段暂无符合筛选条件的软件记录',
+    emptyApps: '暂无符合条件的软件使用记录',
+    resetFilter: '重置筛选条件',
+    // 排行与流水
     rankingTitleSuffix: '软件时长排行',
     totalPrefix: '总计',
     timelineTitle: '时段使用流水',
@@ -52,11 +153,26 @@ const MESSAGES = {
     sortNewest: '最新时段在前',
     sortChrono: '00:00 顺序排列',
     emptyTimeline: '当前筛选条件下暂无时段使用流水',
+    // 已屏蔽
     ignoredListTitle: '已屏蔽的软件名单',
     ignoredHint: '不计入屏幕使用时长',
     restoreTrack: '恢复统计',
     emptyIgnored: '当前没有被屏蔽的软件',
     emptyIgnoredSub: '可在任意软件的详情面板中点击“屏蔽此软件”将其排除统计',
+    // 软件详情抽屉 (AppDetailModal)
+    runningForeground: '前台运行中',
+    todayTotalPrefix: '今日累计',
+    sessionsCountText: '共 {n} 个时间段',
+    closeDetail: '关闭详情',
+    dist24hTitle: '24小时使用分布',
+    hoverToViewHour: '悬停查看各小时时长',
+    appCategoryTitle: '软件分类归属',
+    btnIgnoreApp: '屏蔽此软件',
+    btnRestoreApp: '恢复计入统计',
+    sessionListTitle: '使用时间段流水明细',
+    orderByTime: '按时间排列',
+    emptyAppSessions: '当日暂无该软件的分段会话流水记录',
+    resizeTip: '按住拖动可调整窗口大小',
     // 设置面板（对标微信桌面版设置）
     settingsTitle: '设置',
     navGeneral: '通用',
@@ -100,8 +216,29 @@ const MESSAGES = {
     periodDay: '每日',
     periodWeek: '每週',
     periodMonth: '每月',
+    prevDayTitle: '前一天',
+    nextDayTitle: '後一天',
+    prevWeekTitle: '上一週',
+    nextWeekTitle: '下一週',
+    prevMonthTitle: '上一月',
+    nextMonthTitle: '下一月',
+    todayTag: '今日',
+    yesterdayTag: '昨日',
+    thisWeekTag: '本週',
+    thisMonthTag: '本月',
+    weekdays: ['週一', '週二', '週三', '週四', '週五', '週六', '週日'],
     statusCollecting: '即時採集中',
     statusReady: '背景就緒',
+    statusAllDayCollecting: '全天即時採集中',
+    activeDaysPrefix: '活躍',
+    activeDaysSuffix: '天',
+    compareYesterday: '昨日',
+    compareLastWeek: '上週',
+    compareLastMonth: '上月',
+    compareSameAs: '與{noun}基本持平',
+    compareMoreThan: '較{noun}多 {dur}',
+    compareLessThan: '較{noun}少 {dur}',
+    hourFilterBadge: '{hour}:00 時段 · 點擊還原',
     backToToday: '回到今日',
     backToWeek: '回到本週',
     backToMonth: '回到本月',
@@ -114,10 +251,29 @@ const MESSAGES = {
     unitSecond: '秒',
     catAll: '全部',
     catSocial: '社交通訊',
-    catCreative: '創意與開發',
+    catCreative: '開發與創意',
     catEntertainment: '影音娛樂',
     catProductivity: '辦公與效率',
-    catOther: '其他',
+    catOther: '其他工具',
+    yAxis1Hour: '1小時',
+    yAxis30Min: '30分鐘',
+    yAxisHours: '{h}小時',
+    xAxisHour: '{h}時',
+    xAxisDay: '{d}日',
+    emptySlotRecord: '該時段暫無軟體使用記錄',
+    clickToViewDate: '點擊查看 {date} 當日明細',
+    appGridTitle: '軟體使用明細',
+    appGridHourTitle: '{hour}:00 時段使用明細',
+    appCountSuffix: '款',
+    btnAllDay: '全天',
+    viewGrid: '雙列',
+    viewGridTip: '雙列磁貼視圖',
+    viewList: '排行',
+    viewListTip: '單列進度條排行視圖',
+    activeInForeground: '目前正在前景使用',
+    emptyHourApps: '該時段暫無符合篩選條件的軟體記錄',
+    emptyApps: '暫無符合條件的軟體使用記錄',
+    resetFilter: '重設篩選條件',
     rankingTitleSuffix: '軟體時長排行',
     totalPrefix: '總計',
     timelineTitle: '時段使用流水',
@@ -130,6 +286,19 @@ const MESSAGES = {
     restoreTrack: '恢復統計',
     emptyIgnored: '目前沒有被封鎖的軟體',
     emptyIgnoredSub: '可在任意軟體的詳情面板中點擊「封鎖此軟體」將其排除統計',
+    runningForeground: '前景執行中',
+    todayTotalPrefix: '今日累計',
+    sessionsCountText: '共 {n} 個時間段',
+    closeDetail: '關閉詳情',
+    dist24hTitle: '24小時使用分佈',
+    hoverToViewHour: '懸停查看各小時時長',
+    appCategoryTitle: '軟體分類歸屬',
+    btnIgnoreApp: '封鎖此軟體',
+    btnRestoreApp: '恢復計入統計',
+    sessionListTitle: '使用時間段流水明細',
+    orderByTime: '按時間排列',
+    emptyAppSessions: '當日暫無該軟體的分段會話流水記錄',
+    resizeTip: '按住拖曳可調整視窗大小',
     settingsTitle: '設定',
     navGeneral: '通用',
     navAbout: '關於 Dayflow',
@@ -172,8 +341,29 @@ const MESSAGES = {
     periodDay: 'Day',
     periodWeek: 'Week',
     periodMonth: 'Month',
+    prevDayTitle: 'Previous Day',
+    nextDayTitle: 'Next Day',
+    prevWeekTitle: 'Previous Week',
+    nextWeekTitle: 'Next Week',
+    prevMonthTitle: 'Previous Month',
+    nextMonthTitle: 'Next Month',
+    todayTag: 'Today',
+    yesterdayTag: 'Yesterday',
+    thisWeekTag: 'This Week',
+    thisMonthTag: 'This Month',
+    weekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
     statusCollecting: 'Tracking Live',
     statusReady: 'Standing By',
+    statusAllDayCollecting: 'Live tracking all day',
+    activeDaysPrefix: 'Active',
+    activeDaysSuffix: 'days',
+    compareYesterday: 'yesterday',
+    compareLastWeek: 'last week',
+    compareLastMonth: 'last month',
+    compareSameAs: 'About the same as {noun}',
+    compareMoreThan: '{dur} more than {noun}',
+    compareLessThan: '{dur} less than {noun}',
+    hourFilterBadge: '{hour}:00 Slot · Reset',
     backToToday: 'Today',
     backToWeek: 'This Week',
     backToMonth: 'This Month',
@@ -190,6 +380,25 @@ const MESSAGES = {
     catEntertainment: 'Media & Fun',
     catProductivity: 'Productivity',
     catOther: 'Other',
+    yAxis1Hour: '1h',
+    yAxis30Min: '30m',
+    yAxisHours: '{h}h',
+    xAxisHour: '{h}:00',
+    xAxisDay: '{d}',
+    emptySlotRecord: 'No usage recorded in this slot',
+    clickToViewDate: 'Click to view details for {date}',
+    appGridTitle: 'App Usage Details',
+    appGridHourTitle: 'Usage at {hour}:00',
+    appCountSuffix: 'apps',
+    btnAllDay: 'All Day',
+    viewGrid: 'Grid',
+    viewGridTip: '2-Column Grid View',
+    viewList: 'List',
+    viewListTip: 'Ranked Progress View',
+    activeInForeground: 'Currently active in foreground',
+    emptyHourApps: 'No apps recorded in this hour slot',
+    emptyApps: 'No app usage records match current filter',
+    resetFilter: 'Reset Filter',
     rankingTitleSuffix: 'App Usage Ranking',
     totalPrefix: 'Total',
     timelineTitle: 'Usage Timeline',
@@ -202,6 +411,19 @@ const MESSAGES = {
     restoreTrack: 'Restore',
     emptyIgnored: 'No ignored applications',
     emptyIgnoredSub: 'Click any app and select "Ignore App" to exclude it from tracking',
+    runningForeground: 'Active Now',
+    todayTotalPrefix: 'Total',
+    sessionsCountText: '{n} sessions',
+    closeDetail: 'Close',
+    dist24hTitle: '24-Hour Activity',
+    hoverToViewHour: 'Hover to inspect hourly usage',
+    appCategoryTitle: 'Category',
+    btnIgnoreApp: 'Ignore App',
+    btnRestoreApp: 'Restore Tracking',
+    sessionListTitle: 'Session Timeline',
+    orderByTime: 'Chronological',
+    emptyAppSessions: 'No usage sessions recorded for this app today',
+    resizeTip: 'Drag to resize window',
     settingsTitle: 'Settings',
     navGeneral: 'General',
     navAbout: 'About Dayflow',
@@ -215,9 +437,9 @@ const MESSAGES = {
     themeDark: 'Dark Mode',
     themeLight: 'Light Mode',
     labelFontSize: 'Font Size',
-    fontSmall: 'A-',
+    fontSmall: 'Small',
     fontStandard: 'Default',
-    fontLarge: 'A+',
+    fontLarge: 'Large',
     labelAutoStart: 'Launch Dayflow at Login',
     descAutoStart: 'Automatically start Dayflow in background when signing in to Windows.',
     labelAlwaysOnTopSetting: 'Always on Top',
@@ -250,6 +472,142 @@ export function resolveLocaleCode(langPref = appPreferences.language) {
 export const currentLocale = computed(() => resolveLocaleCode(appPreferences.language))
 
 export const i18n = computed(() => MESSAGES[currentLocale.value] || MESSAGES['zh-CN'])
+
+/**
+ * 根据当前语言返回分类名称
+ */
+export function getCategoryLabel(catKey) {
+  const t = i18n.value
+  const map = {
+    all: t.catAll,
+    social: t.catSocial,
+    creative: t.catCreative,
+    entertainment: t.catEntertainment,
+    productivity: t.catProductivity,
+    other: t.catOther,
+  }
+  return map[catKey] || map.other
+}
+
+/**
+ * 根据当前语言返回软件本地化显示名
+ */
+export function getLocalizedAppName(rawName) {
+  if (!rawName) return i18n.value.catOther
+  const str = String(rawName).trim()
+  const loc = currentLocale.value
+  if (loc === 'en' && APP_NAME_EN_MAP[str]) {
+    return APP_NAME_EN_MAP[str]
+  }
+  if (loc === 'zh-TW' && APP_NAME_TW_MAP[str]) {
+    return APP_NAME_TW_MAP[str]
+  }
+  return str
+}
+
+/**
+ * 多语言时长格式化（zh-CN: "2小时 15分钟" / en: "2h 15m" / zh-TW: "2小時 15分鐘"）
+ */
+export function formatDurationI18n(seconds, { showSecondsWhenUnderMinute = true } = {}) {
+  const loc = currentLocale.value
+  const sec = Math.max(0, Math.floor(Number(seconds) || 0))
+  const hours = Math.floor(sec / 3600)
+  const minutes = Math.floor((sec % 3600) / 60)
+
+  if (loc === 'en') {
+    if (sec === 0) return '0m'
+    if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`
+    if (hours > 0) return `${hours}h`
+    if (minutes > 0) return `${minutes}m`
+    return showSecondsWhenUnderMinute ? `${sec}s` : '<1m'
+  }
+
+  const hUnit = loc === 'zh-TW' ? '小時' : '小时'
+  const mUnit = loc === 'zh-TW' ? '分鐘' : '分钟'
+  const sUnit = '秒'
+
+  if (sec === 0) return `0${mUnit}`
+  if (hours > 0 && minutes > 0) {
+    return `${hours}${hUnit} ${minutes}${mUnit}`
+  }
+  if (hours > 0) {
+    return `${hours}${hUnit}`
+  }
+  if (minutes > 0) {
+    return `${minutes}${mUnit}`
+  }
+  return showSecondsWhenUnderMinute ? `${sec}${sUnit}` : loc === 'zh-TW' ? '不足1分鐘' : '不足1分钟'
+}
+
+/**
+ * 多语言格式化日期/周/月顶部横幅
+ */
+export function formatPeriodBannerI18n(dashboard, fallbackDateStr = '') {
+  const loc = currentLocale.value
+  const t = i18n.value
+  const period = dashboard?.period || 'day'
+  const rawDate = dashboard?.date_str || fallbackDateStr || ''
+  const todayStr = dashboard?.today_str || ''
+
+  if (!rawDate) return t.todayTag
+
+  const parseYMD = (s) => {
+    const p = String(s || '').split('-').map(Number)
+    if (p.length !== 3) return null
+    return { y: p[0], m: p[1], d: p[2], dt: new Date(p[0], p[1] - 1, p[2]) }
+  }
+
+  const cur = parseYMD(rawDate)
+  if (!cur) return rawDate
+
+  const monthNamesEn = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+  if (period === 'week') {
+    const s = parseYMD(dashboard?.start_date_str) || cur
+    const e = parseYMD(dashboard?.end_date_str) || cur
+    const isThisWeek = todayStr && dashboard?.start_date_str <= todayStr && todayStr <= dashboard?.end_date_str
+    if (loc === 'en') {
+      const rangeStr = `${monthNamesEn[s.m - 1]} ${s.d} - ${monthNamesEn[e.m - 1]} ${e.d}`
+      return isThisWeek ? `${rangeStr} · ${t.thisWeekTag}` : rangeStr
+    }
+    const rangeStr = `${s.m}月${s.d}日 - ${e.m}月${e.d}日`
+    return isThisWeek ? `${rangeStr} · ${t.thisWeekTag}` : rangeStr
+  }
+
+  if (period === 'month') {
+    const isThisMonth = todayStr && todayStr.slice(0, 7) === rawDate.slice(0, 7)
+    if (loc === 'en') {
+      const mStr = `${monthNamesEn[cur.m - 1]} ${cur.y}`
+      return isThisMonth ? `${mStr} · ${t.thisMonthTag}` : mStr
+    }
+    const mStr = `${cur.y}年${cur.m}月`
+    return isThisMonth ? `${mStr} · ${t.thisMonthTag}` : mStr
+  }
+
+  // period === 'day'
+  const jsDay = cur.dt.getDay() // 0=Sun..6=Sat
+  const wkIdx = (jsDay + 6) % 7 // 0=Mon..6=Sun
+  const wkName = t.weekdays[wkIdx] || ''
+
+  let dayTag = ''
+  if (todayStr && rawDate === todayStr) {
+    dayTag = t.todayTag
+  } else if (todayStr) {
+    const td = parseYMD(todayStr)
+    if (td) {
+      const diffDays = Math.round((td.dt - cur.dt) / 86400000)
+      if (diffDays === 1) dayTag = t.yesterdayTag
+    }
+  }
+
+  if (loc === 'en') {
+    const md = `${monthNamesEn[cur.m - 1]} ${cur.d}`
+    return dayTag ? `${md} · ${dayTag} (${wkName})` : `${md} · ${wkName}`
+  }
+
+  const md = `${cur.m}月${cur.d}日`
+  return dayTag ? `${md} ${dayTag} · ${wkName}` : `${md} · ${wkName}`
+}
 
 export function resolveEffectiveTheme(themePref = appPreferences.theme) {
   if (themePref === 'light' || themePref === 'dark') {

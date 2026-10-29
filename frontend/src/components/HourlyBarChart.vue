@@ -1,6 +1,12 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { CATEGORY_META, CATEGORY_ORDER, formatDuration } from '../api/bridge'
+import {
+  i18n,
+  currentLocale,
+  effectiveTheme,
+  getCategoryLabel,
+} from '../i18n'
 
 const props = defineProps({
   period: {
@@ -32,6 +38,8 @@ const props = defineProps({
 const emit = defineEmits(['select-hour', 'update:selectedHour', 'update:modelValue', 'select-date'])
 
 const hoveredIndex = ref(null)
+const t = computed(() => i18n.value)
+const isLight = computed(() => effectiveTheme.value === 'light')
 
 const activeSelectedHour = computed(() => {
   if (props.modelValue !== null && props.modelValue !== undefined) {
@@ -66,13 +74,14 @@ const yMaxSec = computed(() => {
 
 const yAxisLabels = computed(() => {
   if (props.period === 'day') {
-    return { top: '1小时', mid: '30分钟', bottom: '0' }
+    return { top: t.value.yAxis1Hour, mid: t.value.yAxis30Min, bottom: '0' }
   }
   const topHours = Math.round(yMaxSec.value / 3600)
   const midHours = topHours / 2
+  const midStr = Number.isInteger(midHours) ? String(midHours) : midHours.toFixed(1)
   return {
-    top: `${topHours}小时`,
-    mid: Number.isInteger(midHours) ? `${midHours}小时` : `${midHours.toFixed(1)}小时`,
+    top: t.value.yAxisHours.replace('{h}', String(topHours)),
+    mid: t.value.yAxisHours.replace('{h}', midStr),
     bottom: '0',
   }
 })
@@ -97,7 +106,9 @@ const normalizedBuckets = computed(() => {
         hour,
         dateStr: raw.date_str || null,
         title: `${String(hour).padStart(2, '0')}:00 - ${String(hour).padStart(2, '0')}:59`,
-        shortLabel: [0, 6, 12, 18].includes(hour) ? `${hour}时` : '',
+        shortLabel: [0, 6, 12, 18].includes(hour)
+          ? t.value.xAxisHour.replace('{h}', String(hour))
+          : '',
         raw,
         maxCap: 3600,
       })
@@ -106,12 +117,42 @@ const normalizedBuckets = computed(() => {
 
   return rawList.value.map((raw, idx) => {
     const index = typeof raw?.index === 'number' ? raw.index : idx
+    const dateStr = raw?.date_str || null
+    let shortLabel = raw?.short_label ?? ''
+    let title = raw?.label || dateStr || `#${index + 1}`
+
+    if (props.period === 'week') {
+      const wkLabel = t.value.weekdays?.[idx] || shortLabel
+      shortLabel = wkLabel
+      if (dateStr) {
+        const parts = dateStr.split('-').map(Number)
+        if (parts.length === 3) {
+          title =
+            currentLocale.value === 'en'
+              ? `${wkLabel} (${parts[1]}/${parts[2]})`
+              : `${parts[1]}月${parts[2]}日 ${wkLabel}`
+        }
+      }
+    } else if (props.period === 'month' && dateStr) {
+      const parts = dateStr.split('-').map(Number)
+      if (parts.length === 3) {
+        const dayNum = parts[2]
+        if (shortLabel) {
+          shortLabel = t.value.xAxisDay.replace('{d}', String(dayNum))
+        }
+        title =
+          currentLocale.value === 'en'
+            ? `${dateStr}`
+            : `${parts[1]}月${parts[2]}日`
+      }
+    }
+
     return buildBucketItem({
       index,
       hour: raw?.hour ?? null,
-      dateStr: raw?.date_str || null,
-      title: raw?.label || raw?.date_str || `#${index + 1}`,
-      shortLabel: raw?.short_label ?? '',
+      dateStr,
+      title,
+      shortLabel,
       raw: raw || {},
       maxCap,
     })
@@ -129,7 +170,7 @@ function buildBucketItem({ index, hour, dateStr, title, shortLabel, raw, maxCap 
       const meta = props.categoryMeta?.[key] || CATEGORY_META[key] || CATEGORY_META.other
       segments.push({
         key,
-        label: meta.label,
+        label: getCategoryLabel(key),
         color: meta.color,
         sec,
       })
@@ -224,14 +265,19 @@ const gridColumnsStyle = computed(() => ({
     >
       <div
         v-if="activeTooltipBucket"
-        class="pointer-events-none absolute -top-2 z-20 min-w-[172px] rounded-xl bg-[#22222B]/95 backdrop-blur-md border border-white/[0.12] px-3 py-2 shadow-floating"
+        class="pointer-events-none absolute -top-2 z-20 min-w-[172px] rounded-xl backdrop-blur-md border px-3 py-2"
+        :class="
+          isLight
+            ? 'bg-white/95 border-black/[0.09] shadow-lg'
+            : 'bg-[#22222B]/95 border-white/[0.12] shadow-floating'
+        "
         :style="tooltipPositionStyle"
       >
         <div class="flex items-center justify-between gap-3 border-b border-white/[0.07] pb-1 mb-1.5">
           <span class="text-[11px] font-semibold text-zinc-200">
             {{ activeTooltipBucket.title }}
           </span>
-          <span class="text-[11px] font-medium text-blue-400">
+          <span class="text-[11px] font-medium text-blue-500">
             {{ formatDuration(activeTooltipBucket.totalSec) }}
           </span>
         </div>
@@ -255,7 +301,7 @@ const gridColumnsStyle = computed(() => ({
           </div>
         </div>
         <div v-else class="text-[11px] text-zinc-500 py-0.5">
-          该时段暂无软件使用记录
+          {{ t.emptySlotRecord }}
         </div>
       </div>
     </transition>
@@ -290,7 +336,11 @@ const gridColumnsStyle = computed(() => ({
             :key="bucket.index"
             type="button"
             class="group relative flex flex-col justify-end items-center h-full w-full focus:outline-none cursor-pointer"
-            :title="period !== 'day' && bucket.dateStr ? `点击查看 ${bucket.dateStr} 当日明细` : ''"
+            :title="
+              period !== 'day' && bucket.dateStr
+                ? t.clickToViewDate.replace('{date}', bucket.dateStr)
+                : ''
+            "
             @mouseenter="hoveredIndex = bucket.index"
             @mouseleave="hoveredIndex = null"
             @click="handleBarClick(bucket)"

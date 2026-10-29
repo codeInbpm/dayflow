@@ -1,7 +1,13 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { LayoutGrid, AlignLeft, Clock, FilterX, Sparkles } from 'lucide-vue-next'
+import { LayoutGrid, AlignLeft, Clock, FilterX } from 'lucide-vue-next'
 import { CATEGORY_META, CATEGORY_ORDER, formatDuration } from '../api/bridge'
+import {
+  i18n,
+  effectiveTheme,
+  getCategoryLabel,
+  getLocalizedAppName,
+} from '../i18n'
 
 const props = defineProps({
   apps: {
@@ -47,6 +53,8 @@ const emit = defineEmits([
 ])
 
 const viewMode = ref(props.defaultViewMode === 'list' ? 'list' : 'grid')
+const t = computed(() => i18n.value)
+const isLight = computed(() => effectiveTheme.value === 'light')
 
 watch(
   () => props.defaultViewMode,
@@ -58,13 +66,13 @@ watch(
 )
 
 const categoryTabs = computed(() => {
-  const list = [{ key: 'all', label: '全部', color: '#3B82F6' }]
+  const list = [{ key: 'all', label: t.value.catAll, color: '#3B82F6' }]
   for (const key of CATEGORY_ORDER) {
     const meta = props.categoryMeta?.[key] || CATEGORY_META[key]
     if (meta) {
       list.push({
         key,
-        label: meta.label,
+        label: getCategoryLabel(key),
         color: meta.color,
       })
     }
@@ -134,11 +142,15 @@ function isAppActive(app) {
 }
 
 function getCategoryInfo(catKey) {
-  return props.categoryMeta?.[catKey] || CATEGORY_META[catKey] || CATEGORY_META.other
+  const base = props.categoryMeta?.[catKey] || CATEGORY_META[catKey] || CATEGORY_META.other
+  return {
+    ...base,
+    label: getCategoryLabel(catKey),
+  }
 }
 
 function getAppInitial(name) {
-  const clean = String(name || '?').trim()
+  const clean = String(getLocalizedAppName(name) || '?').trim()
   return clean.slice(0, 1).toUpperCase()
 }
 
@@ -163,53 +175,73 @@ function handleAppClick(app) {
     <div class="flex items-center justify-between gap-2 mb-2.5">
       <div class="flex items-center gap-2 min-w-0">
         <h2 class="text-[13px] font-semibold text-zinc-100 tracking-wide truncate">
-          {{ selectedHour !== null ? `${String(selectedHour).padStart(2, '0')}:00 时段使用明细` : '软件使用明细' }}
+          {{
+            selectedHour !== null
+              ? t.appGridHourTitle.replace('{hour}', String(selectedHour).padStart(2, '0'))
+              : t.appGridTitle
+          }}
         </h2>
         <span class="px-1.5 py-0.5 rounded-md bg-white/[0.05] text-[11px] font-medium text-zinc-400">
-          {{ filteredApps.length }} 款
+          {{ filteredApps.length }} {{ t.appCountSuffix }}
         </span>
 
         <button
           v-if="selectedHour !== null"
           type="button"
-          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-[11px] text-blue-300 hover:bg-blue-500/25 transition-colors"
+          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-[11px] hover:bg-blue-500/25 transition-colors"
+          :class="isLight ? 'text-blue-600' : 'text-blue-300'"
           @click="handleClearHour"
         >
           <FilterX class="w-3 h-3" />
-          <span>全天</span>
+          <span>{{ t.btnAllDay }}</span>
         </button>
       </div>
 
-      <!-- 双列磁贴 / 单列进度条视图切换器 -->
-      <div class="inline-flex items-center p-0.5 rounded-lg bg-[#15151B] border border-white/[0.06] shrink-0">
+      <!-- 双列磁贴 / 单列进度条视图切换器 (修复浅色模式下黑底黑字问题) -->
+      <div
+        class="inline-flex items-center p-0.5 rounded-lg border shrink-0 transition-colors"
+        :class="
+          isLight
+            ? 'bg-[#EBEBEF] border-black/[0.06]'
+            : 'bg-[#15151B] border-white/[0.06]'
+        "
+      >
         <button
           type="button"
-          class="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all duration-150"
+          class="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all duration-150 cursor-pointer"
           :class="
             viewMode === 'grid'
-              ? 'bg-[#272733] text-white shadow-sm'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? isLight
+                ? 'bg-white text-zinc-900 shadow-sm font-semibold'
+                : 'bg-[#272733] text-white shadow-sm'
+              : isLight
+                ? 'text-zinc-500 hover:text-zinc-800'
+                : 'text-zinc-400 hover:text-zinc-200'
           "
-          title="双列磁贴视图"
+          :title="t.viewGridTip"
           @click="viewMode = 'grid'"
         >
           <LayoutGrid class="w-3.5 h-3.5" />
-          <span>双列</span>
+          <span>{{ t.viewGrid }}</span>
         </button>
 
         <button
           type="button"
-          class="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all duration-150"
+          class="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all duration-150 cursor-pointer"
           :class="
             viewMode === 'list'
-              ? 'bg-[#272733] text-white shadow-sm'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? isLight
+                ? 'bg-white text-zinc-900 shadow-sm font-semibold'
+                : 'bg-[#272733] text-white shadow-sm'
+              : isLight
+                ? 'text-zinc-500 hover:text-zinc-800'
+                : 'text-zinc-400 hover:text-zinc-200'
           "
-          title="单列进度条排行视图"
+          :title="t.viewListTip"
           @click="viewMode = 'list'"
         >
           <AlignLeft class="w-3.5 h-3.5" />
-          <span>排行</span>
+          <span>{{ t.viewList }}</span>
         </button>
       </div>
     </div>
@@ -220,10 +252,12 @@ function handleAppClick(app) {
         v-for="tab in categoryTabs"
         :key="tab.key"
         type="button"
-        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium whitespace-nowrap transition-all duration-150 border shrink-0"
+        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium whitespace-nowrap transition-all duration-150 border shrink-0 cursor-pointer"
         :class="
           selectedCategory === tab.key
-            ? 'bg-white/[0.1] text-white border-white/[0.18] shadow-sm'
+            ? isLight
+              ? 'bg-blue-500/12 text-blue-600 border-blue-500/30 font-semibold shadow-sm'
+              : 'bg-white/[0.1] text-white border-white/[0.18] shadow-sm'
             : 'bg-white/[0.02] text-zinc-400 border-white/[0.04] hover:bg-white/[0.05] hover:text-zinc-200'
         "
         @click="handleCategorySelect(tab.key)"
@@ -254,7 +288,7 @@ function handleAppClick(app) {
           <img
             v-if="app.icon_base64"
             :src="app.icon_base64"
-            :alt="app.display_name"
+            :alt="getLocalizedAppName(app.display_name)"
             class="w-[38px] h-[38px] rounded-[10px] object-contain bg-white/[0.04] p-0.5 border border-white/[0.06] group-hover:scale-[1.03] transition-transform duration-150"
           />
           <div
@@ -268,19 +302,20 @@ function handleAppClick(app) {
           <!-- 当前前台活跃软件绿色呼吸指示点 -->
           <span
             v-if="isAppActive(app)"
-            class="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-[#18181F] p-0.5"
-            title="当前正在前台使用"
+            class="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full p-0.5"
+            :class="isLight ? 'bg-white' : 'bg-[#18181F]'"
+            :title="t.activeInForeground"
           >
             <span class="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-emerald-400 opacity-75"></span>
             <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
           </span>
         </div>
 
-        <!-- 右侧：上方白色软件名 + 下方灰色累计时长 (1:1 复刻参考图2排版) -->
+        <!-- 右侧：上方软件名 + 下方累计时长 -->
         <div class="flex flex-col min-w-0 flex-1">
           <div class="flex items-center gap-1.5">
-            <span class="text-[13px] font-semibold text-zinc-100 truncate group-hover:text-white">
-              {{ app.display_name }}
+            <span class="text-[13px] font-semibold text-zinc-100 truncate">
+              {{ getLocalizedAppName(app.display_name) }}
             </span>
           </div>
           <div class="flex items-center gap-1.5 mt-0.5">
@@ -315,9 +350,9 @@ function handleAppClick(app) {
             class="w-5 text-center text-[12px] font-bold shrink-0"
             :class="
               index === 0
-                ? 'text-amber-400'
+                ? 'text-amber-500'
                 : index === 1
-                  ? 'text-zinc-300'
+                  ? 'text-zinc-400'
                   : index === 2
                     ? 'text-amber-600'
                     : 'text-zinc-500'
@@ -331,7 +366,7 @@ function handleAppClick(app) {
             <img
               v-if="app.icon_base64"
               :src="app.icon_base64"
-              :alt="app.display_name"
+              :alt="getLocalizedAppName(app.display_name)"
               class="w-[36px] h-[36px] rounded-[9px] object-contain bg-white/[0.04] p-0.5 border border-white/[0.06]"
             />
             <div
@@ -344,7 +379,8 @@ function handleAppClick(app) {
 
             <span
               v-if="isAppActive(app)"
-              class="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-[#18181F]"
+              class="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full"
+              :class="isLight ? 'bg-white' : 'bg-[#18181F]'"
             >
               <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
@@ -354,7 +390,7 @@ function handleAppClick(app) {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-1.5">
               <span class="text-[13px] font-semibold text-zinc-100 truncate">
-                {{ app.display_name }}
+                {{ getLocalizedAppName(app.display_name) }}
               </span>
               <span
                 class="px-1.5 py-0.2 rounded text-[10px] font-medium shrink-0"
@@ -402,18 +438,18 @@ function handleAppClick(app) {
     >
       <Clock class="w-6 h-6 text-zinc-500 mb-2" />
       <p class="text-[12px] text-zinc-400 font-medium">
-        {{ selectedHour !== null ? '该时段暂无符合筛选条件的软件记录' : '暂无符合条件的软件使用记录' }}
+        {{ selectedHour !== null ? t.emptyHourApps : t.emptyApps }}
       </p>
       <button
         v-if="selectedCategory !== 'all' || selectedHour !== null"
         type="button"
-        class="mt-2 px-3 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-[11px] text-zinc-300 transition-colors"
+        class="mt-2 px-3 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-[11px] text-zinc-300 transition-colors cursor-pointer"
         @click="
           handleCategorySelect('all');
           handleClearHour();
         "
       >
-        重置筛选条件
+        {{ t.resetFilter }}
       </button>
     </div>
   </section>
