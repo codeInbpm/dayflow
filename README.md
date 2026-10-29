@@ -23,6 +23,14 @@
 
 ---
 
+## 🖼️ 界面预览 (Screenshots)
+
+| 📊 今日看板 & 双列磁贴视图 | 🏆 应用时长排行榜视图 | ⚙️ 通用设置中心 (多语言/主题/字号/自启) |
+| :---: | :---: | :---: |
+| <img src="assets/screenshots/dashboard.png" alt="今日看板与双列磁贴视图" width="280" /> | <img src="assets/screenshots/ranking.png" alt="应用时长排行榜视图" width="280" /> | <img src="assets/screenshots/settings.png" alt="通用设置中心" width="280" /> |
+
+---
+
 ## 🚀 核心功能特性 (Key Features)
 
 ### 1. 📈 多维度可视化看板（每日 / 每周 / 每月）
