@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import os
 import sys
@@ -14,10 +15,68 @@ from dayflow.database import UsageDatabase
 from dayflow.tracker import ForegroundTracker
 from dayflow.tray import TrayController
 
-BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_DB_PATH = BASE_DIR / "data" / "dayflow.db"
+
+def get_resource_dir() -> Path:
+    """获取静态资源根目录（兼容 PyInstaller 单文件/文件夹打包模式与源码开发模式）。"""
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass).resolve()
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def get_default_db_path() -> Path:
+    """获取默认 SQLite 数据库存储路径（打包后优先存放在 exe 同级 data/ 目录，无写权限时回退到 %LOCALAPPDATA%/Dayflow）。"""
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        candidate_dir = exe_dir / "data"
+        try:
+            candidate_dir.mkdir(parents=True, exist_ok=True)
+            test_file = candidate_dir / ".write_probe"
+            test_file.write_text("ok", encoding="utf-8")
+            test_file.unlink(missing_ok=True)
+            return candidate_dir / "dayflow.db"
+        except Exception:
+            local_appdata = Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
+            fallback_dir = local_appdata / "Dayflow" / "data"
+            fallback_dir.mkdir(parents=True, exist_ok=True)
+            return fallback_dir / "dayflow.db"
+    return Path(__file__).resolve().parent / "data" / "dayflow.db"
+
+
+BASE_DIR = get_resource_dir()
+DEFAULT_DB_PATH = get_default_db_path()
 DIST_INDEX_PATH = BASE_DIR / "frontend" / "dist" / "index.html"
 DEV_SERVER_URL = "http://localhost:5173"
+
+_SINGLE_INSTANCE_MUTEX = None
+
+
+def ensure_single_instance() -> bool:
+    """确保同一台电脑只运行一个 Dayflow 实例；若已运行则自动唤醒已有窗口并返回 False。"""
+    global _SINGLE_INSTANCE_MUTEX
+    if sys.platform != "win32":
+        return True
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        mutex_name = "Local\\Dayflow_TimeTracker_SingleInstance_Mutex_v1"
+        handle = kernel32.CreateMutexW(None, False, mutex_name)
+        last_err = ctypes.get_last_error()
+        _SINGLE_INSTANCE_MUTEX = handle
+        # ERROR_ALREADY_EXISTS == 183
+        if last_err == 183:
+            hwnd = user32.FindWindowW(None, "Dayflow")
+            if hwnd:
+                # SW_RESTORE = 9, SW_SHOW = 5
+                user32.ShowWindow(hwnd, 9)
+                user32.ShowWindow(hwnd, 5)
+                user32.SetForegroundWindow(hwnd)
+            return False
+    except Exception:
+        pass
+    return True
 
 
 def run_smoke_test(db_path: Path, duration_sec: float = 2.0) -> int:
@@ -64,6 +123,9 @@ def run_smoke_test(db_path: Path, duration_sec: float = 2.0) -> int:
 
 def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SERVER_URL) -> int:
     """启动 Dayflow 后台采样守护线程、系统托盘与 PyWebView 桌面窗口。"""
+    if not ensure_single_instance():
+        return 0
+
     import webview
 
     db = UsageDatabase(db_path)

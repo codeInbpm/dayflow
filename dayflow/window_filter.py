@@ -60,6 +60,8 @@ SYSTEM_EXE_BLACKLIST: frozenset[str] = frozenset(
         "werfault.exe",
         "wermgr.exe",
         "chsime.exe",
+        "dayflow.exe",
+        "msedgewebview2.exe",
     }
 )
 
