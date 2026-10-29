@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { Pin, Minus, X, LayoutDashboard, BarChart3, Clock3, EyeOff } from 'lucide-vue-next'
-import { toggleAlwaysOnTop, minimizeWindow, hideToTray } from '../api/bridge'
+import { toggleAlwaysOnTop, minimizeWindow, quitApp } from '../api/bridge'
 
 const props = defineProps({
   activeTab: {
@@ -76,8 +76,8 @@ async function handleMinimize() {
   emit('minimize')
 }
 
-async function handleCloseToTray() {
-  await hideToTray()
+async function handleCloseApp() {
+  await quitApp()
   emit('close')
 }
 
@@ -178,10 +178,10 @@ function handleDragPointerUp(e) {
         <button
           type="button"
           class="flex items-center justify-center w-7 h-7 rounded-lg text-zinc-400 hover:bg-rose-500/20 hover:text-rose-400 transition-colors duration-150 cursor-pointer"
-          title="隐藏到系统托盘"
+          title="结束并退出程序"
           @mousedown.stop
           @pointerdown.stop
-          @click="handleCloseToTray"
+          @click="handleCloseApp"
         >
           <X class="w-3.5 h-3.5" />
         </button>

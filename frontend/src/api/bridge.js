@@ -334,12 +334,32 @@ function buildMockDashboard(dateStr) {
   }
 
   const activeCandidate = appsList.find((a) => a.exe_name === 'Code.exe') || appsList[0] || null
+  const prevDateStr = shiftDateStr(targetDate, -1)
+  const nextDateStr = targetDate < todayStr ? shiftDateStr(targetDate, 1) : null
 
   return {
+    period: 'day',
+    today_str: todayStr,
     date_str: targetDate,
+    start_date_str: targetDate,
+    end_date_str: targetDate,
+    prev_date_str: prevDateStr,
+    next_date_str: nextDateStr,
+    can_go_next: nextDateStr !== null,
+    period_label: targetDate === todayStr ? '今日' : targetDate,
     total_sec: totalSec,
+    avg_daily_sec: totalSec,
     yesterday_total_sec: Math.round(totalSec * 0.86),
     hourly_buckets: hourlyBuckets,
+    chart_buckets: hourlyBuckets.map((b) => ({
+      index: b.hour,
+      hour: b.hour,
+      label: `${b.hour}时`,
+      short_label: [0, 6, 12, 18].includes(b.hour) ? `${b.hour}时` : '',
+      total_sec: b.total_sec,
+      max_sec: 3600,
+      categories: b.categories,
+    })),
     category_totals: categoryTotals,
     apps: appsList,
     recent_dates: recentDates,
@@ -363,15 +383,16 @@ function buildMockDashboard(dateStr) {
 }
 
 /**
- * 获取看板聚合数据
+ * 获取看板聚合数据（支持按日 day / 按周 week / 按月 month）
  * @param {string|null} dateStr YYYY-MM-DD
+ * @param {'day'|'week'|'month'} period
  */
-export async function fetchDashboardData(dateStr = null) {
+export async function fetchDashboardData(dateStr = null, period = 'day') {
   const api = getPyApi()
   if (api && typeof api.get_dashboard_data === 'function') {
-    return await api.get_dashboard_data(dateStr)
+    return await api.get_dashboard_data(dateStr, period)
   }
-  return buildMockDashboard(dateStr)
+  return buildMockDashboard(dateStr, period)
 }
 
 /**
@@ -518,6 +539,20 @@ export async function hideToTray() {
     return await api.hide_to_tray()
   }
   return { ok: true, hidden: true }
+}
+
+/**
+ * 保存当前计时数据并直接退出结束整个程序
+ */
+export async function quitApp() {
+  const api = getPyApi()
+  if (api && typeof api.quit_app === 'function') {
+    return await api.quit_app()
+  }
+  if (typeof window !== 'undefined' && typeof window.close === 'function') {
+    window.close()
+  }
+  return { ok: true, quitting: true }
 }
 
 /**

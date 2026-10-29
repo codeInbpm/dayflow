@@ -3,9 +3,17 @@ import { computed, ref } from 'vue'
 import { CATEGORY_META, CATEGORY_ORDER, formatDuration } from '../api/bridge'
 
 const props = defineProps({
+  period: {
+    type: String,
+    default: 'day',
+  },
   hourlyBuckets: {
     type: Array,
     default: () => [],
+  },
+  chartBuckets: {
+    type: Array,
+    default: null,
   },
   categoryMeta: {
     type: Object,
@@ -21,9 +29,9 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['select-hour', 'update:selectedHour', 'update:modelValue'])
+const emit = defineEmits(['select-hour', 'update:selectedHour', 'update:modelValue', 'select-date'])
 
-const hoveredHour = ref(null)
+const hoveredIndex = ref(null)
 
 const activeSelectedHour = computed(() => {
   if (props.modelValue !== null && props.modelValue !== undefined) {
@@ -32,85 +40,175 @@ const activeSelectedHour = computed(() => {
   return props.selectedHour
 })
 
-// 归一化 0~23 小时数组，确保始终渲染完整 24 根柱子
-const normalizedBuckets = computed(() => {
-  const map = new Map()
-  for (const item of props.hourlyBuckets || []) {
-    if (item && typeof item.hour === 'number') {
-      map.set(item.hour, item)
-    }
+const rawList = computed(() => {
+  if (Array.isArray(props.chartBuckets) && props.chartBuckets.length > 0) {
+    return props.chartBuckets
   }
+  return props.hourlyBuckets || []
+})
 
-  return Array.from({ length: 24 }, (_, hour) => {
-    const raw = map.get(hour) || {}
-    const cats = raw.categories || {}
-    const segments = []
-    let sumSec = 0
+// 计算 Y 轴满量程秒数（按日固定 3600s=1小时；按周/按月根据单日最大值自适应为整小时刻度，最低 7200s=2小时）
+const yMaxSec = computed(() => {
+  if (props.period === 'day') {
+    return 3600
+  }
+  let maxDaySec = 0
+  for (const item of rawList.value) {
+    const sec = Number(item?.total_sec || 0)
+    if (sec > maxDaySec) maxDaySec = sec
+  }
+  if (maxDaySec <= 7200) return 7200 // 2小时
+  if (maxDaySec <= 14400) return 14400 // 4小时
+  if (maxDaySec <= 28800) return 28800 // 8小时
+  if (maxDaySec <= 43200) return 43200 // 12小时
+  return Math.ceil(maxDaySec / 7200) * 7200
+})
 
-    for (const key of CATEGORY_ORDER) {
-      const sec = Math.max(0, Number(cats[key] || 0))
-      if (sec > 0) {
-        const meta = props.categoryMeta?.[key] || CATEGORY_META[key] || CATEGORY_META.other
-        segments.push({
-          key,
-          label: meta.label,
-          color: meta.color,
-          sec,
-        })
-        sumSec += sec
+const yAxisLabels = computed(() => {
+  if (props.period === 'day') {
+    return { top: '1小时', mid: '30分钟', bottom: '0' }
+  }
+  const topHours = Math.round(yMaxSec.value / 3600)
+  const midHours = topHours / 2
+  return {
+    top: `${topHours}小时`,
+    mid: Number.isInteger(midHours) ? `${midHours}小时` : `${midHours.toFixed(1)}小时`,
+    bottom: '0',
+  }
+})
+
+// 归一化柱状图数组（day: 24 根; week: 7 根; month: 28~31 根）
+const normalizedBuckets = computed(() => {
+  const maxCap = yMaxSec.value
+
+  if (props.period === 'day') {
+    const map = new Map()
+    for (const item of rawList.value) {
+      const h = item?.hour ?? item?.index
+      if (typeof h === 'number') {
+        map.set(h, item)
       }
     }
 
-    const cappedTotal = Math.min(3600, Math.max(Number(raw.total_sec || 0), sumSec))
-    // 计算每段占 3600 秒（1小时满量程）的高度百分比
-    const scaleFactor = sumSec > 3600 ? 3600 / sumSec : 1
-    const scaledSegments = segments.map((seg) => ({
-      ...seg,
-      heightPct: Math.max(2.5, (seg.sec * scaleFactor / 3600) * 100),
-    }))
+    return Array.from({ length: 24 }, (_, hour) => {
+      const raw = map.get(hour) || {}
+      return buildBucketItem({
+        index: hour,
+        hour,
+        dateStr: raw.date_str || null,
+        title: `${String(hour).padStart(2, '0')}:00 - ${String(hour).padStart(2, '0')}:59`,
+        shortLabel: [0, 6, 12, 18].includes(hour) ? `${hour}时` : '',
+        raw,
+        maxCap: 3600,
+      })
+    })
+  }
 
-    return {
-      hour,
-      totalSec: cappedTotal,
-      totalPct: Math.min(100, (cappedTotal / 3600) * 100),
-      segments: scaledSegments,
-    }
+  return rawList.value.map((raw, idx) => {
+    const index = typeof raw?.index === 'number' ? raw.index : idx
+    return buildBucketItem({
+      index,
+      hour: raw?.hour ?? null,
+      dateStr: raw?.date_str || null,
+      title: raw?.label || raw?.date_str || `#${index + 1}`,
+      shortLabel: raw?.short_label ?? '',
+      raw: raw || {},
+      maxCap,
+    })
   })
 })
 
+function buildBucketItem({ index, hour, dateStr, title, shortLabel, raw, maxCap }) {
+  const cats = raw.categories || {}
+  const segments = []
+  let sumSec = 0
+
+  for (const key of CATEGORY_ORDER) {
+    const sec = Math.max(0, Number(cats[key] || 0))
+    if (sec > 0) {
+      const meta = props.categoryMeta?.[key] || CATEGORY_META[key] || CATEGORY_META.other
+      segments.push({
+        key,
+        label: meta.label,
+        color: meta.color,
+        sec,
+      })
+      sumSec += sec
+    }
+  }
+
+  const realTotal = Math.max(Number(raw.total_sec || 0), sumSec)
+  const cappedTotal = Math.min(maxCap, realTotal)
+  const scaleFactor = sumSec > maxCap ? maxCap / sumSec : 1
+  const scaledSegments = segments.map((seg) => ({
+    ...seg,
+    heightPct: Math.max(2.5, ((seg.sec * scaleFactor) / maxCap) * 100),
+  }))
+
+  return {
+    index,
+    hour,
+    dateStr,
+    title,
+    shortLabel,
+    totalSec: realTotal,
+    totalPct: Math.min(100, (cappedTotal / maxCap) * 100),
+    segments: scaledSegments,
+  }
+}
+
 const activeTooltipBucket = computed(() => {
-  const targetHour =
-    hoveredHour.value !== null ? hoveredHour.value : activeSelectedHour.value
-  if (targetHour === null || targetHour === undefined) return null
-  return normalizedBuckets.value[targetHour] || null
+  const targetIdx =
+    hoveredIndex.value !== null
+      ? hoveredIndex.value
+      : props.period === 'day'
+        ? activeSelectedHour.value
+        : null
+  if (targetIdx === null || targetIdx === undefined) return null
+  return normalizedBuckets.value.find((b) => b.index === targetIdx) || null
 })
 
 const tooltipPositionStyle = computed(() => {
   if (!activeTooltipBucket.value) return {}
-  const h = activeTooltipBucket.value.hour
-  const pct = ((h + 0.5) / 24) * 100
-  if (h <= 4) {
+  const totalCount = Math.max(1, normalizedBuckets.value.length)
+  const idx = activeTooltipBucket.value.index
+  const pct = ((idx + 0.5) / totalCount) * 100
+  if (pct <= 22) {
     return { left: '0%', transform: 'translateX(0)' }
   }
-  if (h >= 19) {
+  if (pct >= 78) {
     return { right: '0%', transform: 'translateX(0)' }
   }
   return { left: `${pct}%`, transform: 'translateX(-50%)' }
 })
 
-function handleBarClick(hour) {
-  const next = activeSelectedHour.value === hour ? null : hour
-  emit('select-hour', next)
-  emit('update:selectedHour', next)
-  emit('update:modelValue', next)
+function handleBarClick(bucket) {
+  if (props.period === 'day') {
+    const next = activeSelectedHour.value === bucket.index ? null : bucket.index
+    emit('select-hour', next)
+    emit('update:selectedHour', next)
+    emit('update:modelValue', next)
+  } else if (bucket.dateStr) {
+    emit('select-date', bucket.dateStr)
+  }
 }
 
-const xTicks = [
-  { hour: 0, label: '0时', leftPct: (0 / 24) * 100 },
-  { hour: 6, label: '6时', leftPct: (6 / 24) * 100 },
-  { hour: 12, label: '12时', leftPct: (12 / 24) * 100 },
-  { hour: 18, label: '18时', leftPct: (18 / 24) * 100 },
-]
+const xTicks = computed(() => {
+  const count = normalizedBuckets.value.length
+  if (count === 0) return []
+  return normalizedBuckets.value
+    .filter((b) => Boolean(b.shortLabel))
+    .map((b) => ({
+      index: b.index,
+      label: b.shortLabel,
+      leftPct: props.period === 'week' ? ((b.index + 0.5) / count) * 100 : (b.index / count) * 100,
+      centered: props.period === 'week',
+    }))
+})
+
+const gridColumnsStyle = computed(() => ({
+  gridTemplateColumns: `repeat(${Math.max(1, normalizedBuckets.value.length)}, minmax(0, 1fr))`,
+}))
 </script>
 
 <template>
@@ -126,12 +224,12 @@ const xTicks = [
     >
       <div
         v-if="activeTooltipBucket"
-        class="pointer-events-none absolute -top-2 z-20 min-w-[168px] rounded-xl bg-[#22222B]/95 backdrop-blur-md border border-white/[0.12] px-3 py-2 shadow-floating"
+        class="pointer-events-none absolute -top-2 z-20 min-w-[172px] rounded-xl bg-[#22222B]/95 backdrop-blur-md border border-white/[0.12] px-3 py-2 shadow-floating"
         :style="tooltipPositionStyle"
       >
         <div class="flex items-center justify-between gap-3 border-b border-white/[0.07] pb-1 mb-1.5">
           <span class="text-[11px] font-semibold text-zinc-200">
-            {{ String(activeTooltipBucket.hour).padStart(2, '0') }}:00 - {{ String(activeTooltipBucket.hour).padStart(2, '0') }}:59
+            {{ activeTooltipBucket.title }}
           </span>
           <span class="text-[11px] font-medium text-blue-400">
             {{ formatDuration(activeTooltipBucket.totalSec) }}
@@ -162,11 +260,10 @@ const xTicks = [
       </div>
     </transition>
 
-    <!-- 图表主体：左侧 24 小时柱状绘图区 + 右侧 Y 轴刻度 (1小时 / 30分钟 / 0) -->
+    <!-- 图表主体：左侧柱状绘图区 + 右侧自适应 Y 轴刻度 -->
     <div class="flex items-stretch gap-2">
-      <!-- 24小时柱状图绘图容器 -->
       <div class="relative flex-1 h-[132px]">
-        <!-- 背景水平参考线与竖向分时虚线 (0时/6时/12时/18时) -->
+        <!-- 背景水平参考线 -->
         <div class="pointer-events-none absolute inset-0 flex flex-col justify-between">
           <div class="border-t border-dashed border-white/[0.09] w-full"></div>
           <div class="border-t border-dashed border-white/[0.07] w-full"></div>
@@ -176,32 +273,36 @@ const xTicks = [
         <div class="pointer-events-none absolute inset-0">
           <div
             v-for="tick in xTicks"
-            :key="tick.hour"
-            class="absolute top-0 bottom-0 border-l border-dashed border-white/[0.06]"
+            :key="tick.index"
+            class="absolute top-0 bottom-0 border-l border-dashed border-white/[0.05]"
             :style="{ left: `${tick.leftPct}%` }"
           ></div>
         </div>
 
-        <!-- 24 根分色圆角堆叠柱子 -->
-        <div class="relative z-10 grid grid-cols-24 items-end h-full gap-[3px] px-[2px]">
+        <!-- 分色圆角堆叠柱子 (按日24根 / 按周7根 / 按月30根) -->
+        <div
+          class="relative z-10 grid items-end h-full px-[2px]"
+          :class="period === 'week' ? 'gap-2.5 px-2' : 'gap-[3px]'"
+          :style="gridColumnsStyle"
+        >
           <button
             v-for="bucket in normalizedBuckets"
-            :key="bucket.hour"
+            :key="bucket.index"
             type="button"
             class="group relative flex flex-col justify-end items-center h-full w-full focus:outline-none cursor-pointer"
-            :aria-label="`${bucket.hour}时 使用 ${formatDuration(bucket.totalSec)}`"
-            @mouseenter="hoveredHour = bucket.hour"
-            @mouseleave="hoveredHour = null"
-            @click="handleBarClick(bucket.hour)"
+            :title="period !== 'day' && bucket.dateStr ? `点击查看 ${bucket.dateStr} 当日明细` : ''"
+            @mouseenter="hoveredIndex = bucket.index"
+            @mouseleave="hoveredIndex = null"
+            @click="handleBarClick(bucket)"
           >
-            <!-- 悬停或选中高亮底柱槽 -->
             <div
-              class="w-full h-full rounded-t-[4px] flex flex-col-reverse justify-start overflow-hidden transition-all duration-150"
+              class="w-full h-full flex flex-col-reverse justify-start overflow-hidden transition-all duration-150"
               :class="[
-                activeSelectedHour === bucket.hour
+                period === 'week' ? 'rounded-t-[6px] max-w-[26px]' : 'rounded-t-[4px]',
+                period === 'day' && activeSelectedHour === bucket.index
                   ? 'bg-white/[0.09] ring-1 ring-blue-400/60'
                   : 'group-hover:bg-white/[0.05]',
-                activeSelectedHour !== null && activeSelectedHour !== bucket.hour
+                period === 'day' && activeSelectedHour !== null && activeSelectedHour !== bucket.index
                   ? 'opacity-45 group-hover:opacity-85'
                   : 'opacity-100',
               ]"
@@ -212,7 +313,11 @@ const xTicks = [
                 :key="seg.key"
                 class="w-full bar-segment-transition"
                 :class="[
-                  idx === bucket.segments.length - 1 ? 'rounded-t-[3.5px]' : '',
+                  idx === bucket.segments.length - 1
+                    ? period === 'week'
+                      ? 'rounded-t-[5px]'
+                      : 'rounded-t-[3.5px]'
+                    : '',
                   idx > 0 ? 'mb-[1px]' : '',
                 ]"
                 :style="{
@@ -231,38 +336,33 @@ const xTicks = [
         </div>
       </div>
 
-      <!-- 右侧 Y 轴刻度标注 (对标参考图2: 1小时 / 30分钟 / 0) -->
-      <div class="flex flex-col justify-between text-[11px] text-zinc-500 font-medium leading-none py-0.5 shrink-0 w-10 text-right">
-        <span>1小时</span>
-        <span>30分钟</span>
-        <span>0</span>
+      <!-- 右侧 Y 轴刻度标注 -->
+      <div class="flex flex-col justify-between text-[11px] text-zinc-500 font-medium leading-none py-0.5 shrink-0 w-11 text-right">
+        <span>{{ yAxisLabels.top }}</span>
+        <span>{{ yAxisLabels.mid }}</span>
+        <span>{{ yAxisLabels.bottom }}</span>
       </div>
     </div>
 
-    <!-- 底部 X 轴时间刻度标注 (0时 / 6时 / 12时 / 18时) -->
+    <!-- 底部 X 轴时间刻度标注 -->
     <div class="flex items-center gap-2 mt-1.5">
       <div class="relative flex-1 h-4">
         <span
           v-for="tick in xTicks"
-          :key="tick.hour"
-          class="absolute top-0 text-[11px] font-medium transition-colors duration-150"
-          :class="
-            activeSelectedHour === tick.hour
+          :key="tick.index"
+          class="absolute top-0 text-[11px] font-medium transition-colors duration-150 whitespace-nowrap"
+          :class="[
+            period === 'day' && activeSelectedHour === tick.index
               ? 'text-blue-400 font-semibold'
-              : 'text-zinc-500'
-          "
+              : 'text-zinc-500',
+            tick.centered ? '-translate-x-1/2' : '',
+          ]"
           :style="{ left: `${tick.leftPct}%` }"
         >
           {{ tick.label }}
         </span>
       </div>
-      <div class="w-10 shrink-0"></div>
+      <div class="w-11 shrink-0"></div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.grid-cols-24 {
-  grid-template-columns: repeat(24, minmax(0, 1fr));
-}
-</style>

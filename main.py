@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -111,14 +113,30 @@ def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SE
     except Exception:
         pass
 
+    tray_ref: dict[str, Any] = {"tray": None}
+
     def quit_app() -> None:
-        tracker.stop()
-        w = window_ref.get("win")
-        if w is not None:
+        def _force_terminate() -> None:
+            time.sleep(0.04)
             try:
-                w.destroy()
+                t = tray_ref.get("tray")
+                if t is not None:
+                    t.stop()
             except Exception:
                 pass
+            try:
+                tracker.stop()
+            except Exception:
+                pass
+            try:
+                db.close()
+            except Exception:
+                pass
+            os._exit(0)
+
+        threading.Thread(target=_force_terminate, daemon=True).start()
+
+    bridge.set_on_quit(quit_app)
 
     tray = TrayController(
         on_show=bridge.show_window,
@@ -126,6 +144,7 @@ def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SE
         is_on_top=lambda: bridge.always_on_top,
         on_quit=quit_app,
     )
+    tray_ref["tray"] = tray
 
     tracker.start()
     tray.start()

@@ -63,16 +63,22 @@ class DayflowBridge:
         db: UsageDatabase,
         tracker: ForegroundTracker,
         window_getter: Callable[[], Any] | None = None,
+        on_quit: Callable[[], Any] | None = None,
     ) -> None:
         self.db = db
         self.tracker = tracker
         self._window_getter = window_getter
+        self._on_quit = on_quit
         self._hwnd: int | None = None
         self.always_on_top: bool = False
 
     def set_window_getter(self, window_getter: Callable[[], Any] | None) -> None:
         """设置或更新 PyWebView 窗口获取函数。"""
         self._window_getter = window_getter
+
+    def set_on_quit(self, on_quit: Callable[[], Any] | None) -> None:
+        """设置退出程序回调函数。"""
+        self._on_quit = on_quit
 
     def set_hwnd(self, hwnd: int | None) -> None:
         """缓存主窗口的原生 Win32 HWND 句柄（在 UI 线程 shown 事件中调用）。"""
@@ -127,9 +133,14 @@ class DayflowBridge:
 
         return None
 
-    def get_daily_timeline(self, date_str: str | None = None) -> list[dict]:
-        """按时间顺序返回指定日期所有未屏蔽软件的使用会话流水。"""
-        target_date = date_str or datetime.now().strftime("%Y-%m-%d")
+    def get_daily_timeline(
+        self,
+        date_str: str | None = None,
+        end_date_str: str | None = None,
+    ) -> list[dict]:
+        """按时间顺序返回指定日期（或日期区间）所有未屏蔽软件的使用会话流水。"""
+        start_date = date_str or datetime.now().strftime("%Y-%m-%d")
+        finish_date = end_date_str or start_date
         with self.db._lock:
             rows = self.db._conn.execute(
                 """
@@ -149,10 +160,10 @@ class DayflowBridge:
                     a.icon_base64
                 FROM usage_sessions s
                 JOIN apps a ON a.id = s.app_id
-                WHERE s.date_str = ? AND a.is_ignored = 0
-                ORDER BY s.hour_bucket ASC, s.start_time ASC, s.id ASC
+                WHERE s.date_str BETWEEN ? AND ? AND a.is_ignored = 0
+                ORDER BY s.date_str ASC, s.hour_bucket ASC, s.start_time ASC, s.id ASC
                 """,
-                (target_date,),
+                (start_date, finish_date),
             ).fetchall()
 
             return [
@@ -174,14 +185,31 @@ class DayflowBridge:
                 for r in rows
             ]
 
-    def get_dashboard_data(self, date_str: str | None = None) -> dict:
-        """刷盘当前活跃计时并返回看板完整聚合数据。"""
-        target_date = date_str or datetime.now().strftime("%Y-%m-%d")
+    def get_dashboard_data(
+        self,
+        date_str: str | None = None,
+        period: str = "day",
+    ) -> dict:
+        """刷盘当前活跃计时并返回按日/按周/按月看板完整聚合数据。"""
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        target_date = date_str or today_str
+        norm_period = period if period in ("day", "week", "month") else "day"
         self.tracker.flush()
 
-        summary = self.db.get_daily_summary(target_date)
-        recent_dates = self.db.get_recent_dates(days=7, ref_date=target_date)
-        timeline = self.get_daily_timeline(target_date)
+        summary = self.db.get_period_summary(
+            target_date,
+            period=norm_period,
+            today_str=today_str,
+        )
+        recent_dates = self.db.get_recent_dates(
+            days=7,
+            ref_date=target_date,
+            today_str=today_str,
+        )
+        timeline = self.get_daily_timeline(
+            summary.get("start_date_str", target_date),
+            summary.get("end_date_str", target_date),
+        )
         active_app = self.tracker.get_current_active()
 
         return {
@@ -330,3 +358,17 @@ class DayflowBridge:
             except Exception:
                 pass
         return {"ok": True, "hidden": False}
+
+    def quit_app(self) -> dict:
+        """保存当前正在进行的计时会话并直接退出结束整个程序。"""
+        try:
+            self.tracker.flush()
+        except Exception:
+            pass
+
+        if self._on_quit is not None:
+            try:
+                self._on_quit()
+            except Exception:
+                pass
+        return {"ok": True, "quitting": True}

@@ -191,3 +191,34 @@ def test_toggle_always_on_top_uses_async_win32_without_deadlocking_winforms_sett
     assert res_off == {"ok": True, "always_on_top": False}
     assert bridge.always_on_top is False
     db.close()
+
+
+def test_bridge_period_summaries_and_quit_app(tmp_path):
+    db = UsageDatabase(tmp_path / "bridge_period_quit.db")
+    tracker = ForegroundTracker(db)
+    quit_called = []
+    bridge = DayflowBridge(db, tracker, on_quit=lambda: quit_called.append(True))
+
+    idea = ActiveWindowInfo(
+        11, 2001, "C:/JetBrains/idea64.exe", "idea64.exe", "dayflow - IDEA", "SunAwtFrame"
+    )
+    tracker.tick(datetime(2026, 10, 28, 10, 0, 0), window_info=idea)
+    tracker.tick(datetime(2026, 10, 28, 10, 0, 10), window_info=None)
+    tracker.tick(datetime(2026, 10, 29, 11, 0, 0), window_info=idea)
+    tracker.tick(datetime(2026, 10, 29, 11, 0, 5), window_info=idea)
+
+    week_data = bridge.get_dashboard_data("2026-10-29", period="week")
+    assert week_data["period"] == "week"
+    assert week_data["total_sec"] == 15
+    assert len(week_data["chart_buckets"]) == 7
+    assert len(week_data["timeline"]) == 2
+
+    month_data = bridge.get_dashboard_data("2026-10-29", period="month")
+    assert month_data["period"] == "month"
+    assert month_data["total_sec"] == 15
+    assert len(month_data["chart_buckets"]) == 31
+
+    res_quit = bridge.quit_app()
+    assert res_quit == {"ok": True, "quitting": True}
+    assert quit_called == [True]
+    db.close()

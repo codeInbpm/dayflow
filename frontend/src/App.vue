@@ -24,6 +24,7 @@ import {
 
 const activeTab = ref('dashboard')
 const selectedDate = ref(null)
+const selectedPeriod = ref('day') // 'day' | 'week' | 'month'
 const selectedHour = ref(null)
 const selectedCategory = ref('all')
 const timelineSortDesc = ref(true)
@@ -63,6 +64,7 @@ const filteredTimeline = computed(() => {
       return false
     }
     if (
+      selectedPeriod.value === 'day' &&
       selectedHour.value !== null &&
       selectedHour.value !== undefined &&
       Number(item.hour_bucket) !== Number(selectedHour.value)
@@ -73,7 +75,9 @@ const filteredTimeline = computed(() => {
   })
 
   return [...filtered].sort((a, b) => {
+    const dateCmp = String(a.date_str || '').localeCompare(String(b.date_str || ''))
     const cmp =
+      dateCmp ||
       a.hour_bucket - b.hour_bucket ||
       String(a.start_time).localeCompare(String(b.start_time))
     return timelineSortDesc.value ? -cmp : cmp
@@ -84,9 +88,13 @@ function getCategoryInfo(catKey) {
   return categoryMeta.value[catKey] || CATEGORY_META[catKey] || CATEGORY_META.other
 }
 
-async function loadData(dateStr = selectedDate.value, silent = false) {
+async function loadData(
+  dateStr = selectedDate.value,
+  silent = false,
+  period = selectedPeriod.value
+) {
   try {
-    const data = await fetchDashboardData(dateStr)
+    const data = await fetchDashboardData(dateStr, period)
     if (data) {
       dashboard.value = data
       if (!selectedDate.value && data.date_str) {
@@ -105,7 +113,13 @@ async function loadData(dateStr = selectedDate.value, silent = false) {
 function handleDateChange(newDate) {
   selectedDate.value = newDate
   selectedHour.value = null
-  loadData(newDate)
+  loadData(newDate, false, selectedPeriod.value)
+}
+
+function handlePeriodChange(newPeriod) {
+  selectedPeriod.value = newPeriod
+  selectedHour.value = null
+  loadData(selectedDate.value, false, newPeriod)
 }
 
 function handleOpenAppDetail(appItem) {
@@ -118,19 +132,19 @@ function handleOpenAppDetail(appItem) {
 }
 
 async function handleAppUpdated() {
-  await loadData(selectedDate.value, false)
+  await loadData(selectedDate.value, false, selectedPeriod.value)
 }
 
 async function handleRestoreIgnoredApp(app) {
   if (!app?.id) return
   await updateAppSettings(app.id, { is_ignored: false })
-  await loadData(selectedDate.value, false)
+  await loadData(selectedDate.value, false, selectedPeriod.value)
 }
 
 onMounted(() => {
   loadData()
   pollTimer = setInterval(() => {
-    loadData(selectedDate.value, true)
+    loadData(selectedDate.value, true, selectedPeriod.value)
   }, 2000)
 })
 
@@ -154,14 +168,16 @@ onUnmounted(() => {
 
     <!-- 主内容滚动视图 -->
     <main class="flex-1 overflow-y-auto px-3.5 py-3 space-y-3">
-      <!-- Tab 1: 今日看板 (复刻参考图2上部分24h分色柱状图 + 下部分双列软件图标网格) -->
+      <!-- Tab 1: 今日看板 (支持每日/每周/每月汇总切换 + 分色柱状图 + 双列软件图标网格) -->
       <template v-if="activeTab === 'dashboard' || activeTab === 'overview'">
         <ScreenTimeCard
           :dashboard="dashboard"
           :date-str="selectedDate"
+          v-model:period="selectedPeriod"
           v-model:selectedHour="selectedHour"
           v-model:selectedCategory="selectedCategory"
           @change-date="handleDateChange"
+          @change-period="handlePeriodChange"
         />
 
         <AppUsageGrid
@@ -183,7 +199,7 @@ onUnmounted(() => {
           <div class="flex items-center gap-2">
             <Calendar class="w-4 h-4 text-blue-400" />
             <span class="text-[12px] font-semibold text-zinc-200">
-              {{ selectedDate || dashboard.date_str || '今日' }} 软件时长排行
+              {{ dashboard.period_label || selectedDate || dashboard.date_str || '今日' }} · 软件时长排行
             </span>
           </div>
           <div class="text-[12px] font-semibold text-blue-400">
@@ -204,14 +220,14 @@ onUnmounted(() => {
         />
       </template>
 
-      <!-- Tab 3: 时段流水 (全天所有软件按时间段顺序排列的使用明细流水) -->
+      <!-- Tab 3: 时段流水 (所有软件按时间段顺序排列的使用明细流水) -->
       <template v-else-if="activeTab === 'timeline'">
         <section class="win-surface-card rounded-2xl p-3.5 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-2">
               <Clock3 class="w-4 h-4 text-blue-400" />
               <h2 class="text-[13px] font-semibold text-zinc-100">
-                全天时段使用流水
+                时段使用流水 ({{ dashboard.period_label || '今日' }})
               </h2>
               <span class="px-1.5 py-0.5 rounded-md bg-white/[0.05] text-[11px] text-zinc-400">
                 {{ filteredTimeline.length }} 条记录
@@ -220,7 +236,7 @@ onUnmounted(() => {
 
             <button
               type="button"
-              class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] text-[11px] font-medium text-zinc-300 transition-colors"
+              class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] text-[11px] font-medium text-zinc-300 transition-colors cursor-pointer"
               @click="timelineSortDesc = !timelineSortDesc"
             >
               <ArrowUpDown class="w-3 h-3 text-blue-400" />
@@ -234,7 +250,7 @@ onUnmounted(() => {
               v-for="pill in categoryFilterPills"
               :key="pill.key"
               type="button"
-              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium whitespace-nowrap transition-all border shrink-0"
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium whitespace-nowrap transition-all border shrink-0 cursor-pointer"
               :class="
                 selectedCategory === pill.key
                   ? 'bg-white/[0.1] text-white border-white/[0.18]'
@@ -278,7 +294,13 @@ onUnmounted(() => {
               <!-- 中间：时间区间 + 软件名称 + 窗口标题 -->
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2">
-                  <span class="px-1.5 py-0.5 rounded bg-white/[0.06] text-[11px] font-mono font-semibold text-zinc-200">
+                  <span
+                    v-if="selectedPeriod !== 'day' && record.date_str"
+                    class="px-1.5 py-0.5 rounded bg-blue-500/15 text-[10.5px] font-mono text-blue-300 shrink-0"
+                  >
+                    {{ record.date_str.slice(5) }}
+                  </span>
+                  <span class="px-1.5 py-0.5 rounded bg-white/[0.06] text-[11px] font-mono font-semibold text-zinc-200 shrink-0">
                     {{ record.start_time }} - {{ record.end_time }}
                   </span>
                   <span class="text-[12px] font-semibold text-white truncate">
@@ -367,7 +389,7 @@ onUnmounted(() => {
 
               <button
                 type="button"
-                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-medium text-emerald-300 transition-colors shrink-0"
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-medium text-emerald-300 transition-colors shrink-0 cursor-pointer"
                 @click="handleRestoreIgnoredApp(app)"
               >
                 <Eye class="w-3.5 h-3.5" />

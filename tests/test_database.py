@@ -87,9 +87,68 @@ def test_session_merge_and_app_daily_sessions_and_recent_dates(tmp_path):
     db.record_usage_span(app_id, datetime(2026, 10, 29, 14, 0, 0), datetime(2026, 10, 29, 14, 1, 0), "Tab 4")
     summary_29 = db.get_daily_summary("2026-10-29")
     assert summary_29["yesterday_total_sec"] == 180
-    recent = db.get_recent_dates(days=7, ref_date="2026-10-29")
+    recent = db.get_recent_dates(days=7, ref_date="2026-10-29", today_str="2026-10-29")
     assert len(recent) == 7
     assert recent[-1]["date_str"] == "2026-10-29"
+    assert recent[-1]["label"] == "今日"
     assert recent[-1]["total_sec"] == 60
     assert recent[-2]["date_str"] == "2026-10-28"
+    assert recent[-2]["label"] == "昨日"
     assert recent[-2]["total_sec"] == 180
+
+    # 回归验证：当用户切换到昨日 (2026-10-28) 时，recent_dates 依然包含今日 (2026-10-29)，可以切回今日
+    recent_when_viewing_yesterday = db.get_recent_dates(
+        days=7, ref_date="2026-10-28", today_str="2026-10-29"
+    )
+    assert recent_when_viewing_yesterday[-1]["date_str"] == "2026-10-29"
+    assert recent_when_viewing_yesterday[-1]["label"] == "今日"
+    assert recent_when_viewing_yesterday[-2]["date_str"] == "2026-10-28"
+    assert recent_when_viewing_yesterday[-2]["label"] == "昨日"
+
+
+def test_get_period_summary_day_week_month_and_navigation(tmp_path):
+    db = UsageDatabase(tmp_path / "period.db")
+    app_id = db.upsert_app("C:/Code.exe", "Code.exe", "VS Code", "creative", "")
+
+    # 2026-10-27 (周二): 1800s, 2026-10-28 (周三): 3600s, 2026-10-29 (周四, 今日): 600s
+    db.record_usage_span(app_id, datetime(2026, 10, 27, 9, 0, 0), datetime(2026, 10, 27, 9, 30, 0), "Day 1")
+    db.record_usage_span(app_id, datetime(2026, 10, 28, 10, 0, 0), datetime(2026, 10, 28, 11, 0, 0), "Day 2")
+    db.record_usage_span(app_id, datetime(2026, 10, 29, 14, 0, 0), datetime(2026, 10, 29, 14, 10, 0), "Day 3")
+
+    # 1. 每日汇总：查看昨日 (2026-10-28) 时，可以切去前一天 (2026-10-27) 也可以切回后一天 (2026-10-29)
+    day_summary = db.get_period_summary("2026-10-28", period="day", today_str="2026-10-29")
+    assert day_summary["period"] == "day"
+    assert day_summary["total_sec"] == 3600
+    assert day_summary["prev_date_str"] == "2026-10-27"
+    assert day_summary["next_date_str"] == "2026-10-29"
+    assert day_summary["can_go_next"] is True
+    assert len(day_summary["chart_buckets"]) == 24
+
+    # 2. 每周汇总：2026-10-26 (周一) ~ 2026-11-01 (周日)
+    week_summary = db.get_period_summary("2026-10-29", period="week", today_str="2026-10-29")
+    assert week_summary["period"] == "week"
+    assert week_summary["start_date_str"] == "2026-10-26"
+    assert week_summary["end_date_str"] == "2026-11-01"
+    assert week_summary["total_sec"] == 1800 + 3600 + 600
+    assert week_summary["active_days_count"] == 3
+    assert len(week_summary["chart_buckets"]) == 7
+    assert week_summary["chart_buckets"][1]["date_str"] == "2026-10-27"
+    assert week_summary["chart_buckets"][1]["total_sec"] == 1800
+    assert week_summary["can_go_next"] is False
+    assert week_summary["prev_date_str"] == "2026-10-19"
+
+    # 切换到上一周后，can_go_next 应为 True
+    prev_week = db.get_period_summary("2026-10-19", period="week", today_str="2026-10-29")
+    assert prev_week["can_go_next"] is True
+    assert prev_week["next_date_str"] == "2026-10-26"
+
+    # 3. 每月汇总：2026-10-01 ~ 2026-10-31 (31天)
+    month_summary = db.get_period_summary("2026-10-29", period="month", today_str="2026-10-29")
+    assert month_summary["period"] == "month"
+    assert month_summary["start_date_str"] == "2026-10-01"
+    assert month_summary["end_date_str"] == "2026-10-31"
+    assert month_summary["total_sec"] == 6000
+    assert len(month_summary["chart_buckets"]) == 31
+    assert month_summary["prev_date_str"] == "2026-09-01"
+    assert month_summary["can_go_next"] is False
+    db.close()
