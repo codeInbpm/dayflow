@@ -320,12 +320,12 @@ function handleCategoryClick(catKey) {
     />
 
     <!-- 柱状图正下方：各大分类彩色标题与累计时长汇总行 (对标参考图2) -->
-    <div class="grid grid-cols-4 gap-2 mt-3.5 pt-3 border-t border-white/[0.06]">
+    <div class="grid grid-cols-4 gap-1.5 mt-3.5 pt-3 border-t border-white/[0.06]">
       <button
         v-for="cat in mainCategories"
         :key="cat.key"
         type="button"
-        class="group flex flex-col items-start rounded-xl px-2.5 py-1.5 text-left transition-all duration-150 border"
+        class="group flex flex-col items-start rounded-xl px-2 py-1.5 text-left transition-all duration-150 border"
         :class="
           selectedCategory === cat.key
             ? 'bg-white/[0.08] border-white/[0.15] shadow-sm'
@@ -333,20 +333,20 @@ function handleCategoryClick(catKey) {
         "
         @click="handleCategoryClick(cat.key)"
       >
-        <div class="flex items-center gap-1.5 w-full">
+        <div class="flex items-center gap-1 w-full">
           <span
             class="w-1.5 h-1.5 rounded-full shrink-0"
             :style="{ backgroundColor: cat.color }"
           ></span>
           <span
-            class="text-[12px] font-semibold truncate"
+            class="text-[11.5px] font-semibold whitespace-nowrap"
             :style="{ color: cat.color }"
           >
             {{ cat.label }}
           </span>
         </div>
-        <span class="text-[12px] font-medium text-zinc-300 mt-0.5 pl-3 truncate w-full">
-          {{ formatDuration(cat.totalSec, { showSecondsWhenUnderMinute: false }) }}
+        <span class="text-[12px] font-medium text-zinc-300 mt-0.5 pl-2.5 whitespace-nowrap">
+          {{ formatDuration(cat.totalSec) }}
         </span>
       </button>
     </div>

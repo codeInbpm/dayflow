@@ -96,6 +96,21 @@ def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SE
     )
     window_ref["win"] = win
 
+    def _on_window_shown() -> None:
+        try:
+            native = getattr(win, "native", None)
+            if native is not None and hasattr(native, "Handle"):
+                handle = native.Handle
+                hwnd = int(handle.ToInt32()) if hasattr(handle, "ToInt32") else int(handle)
+                bridge.set_hwnd(hwnd)
+        except Exception:
+            pass
+
+    try:
+        win.events.shown += _on_window_shown
+    except Exception:
+        pass
+
     def quit_app() -> None:
         tracker.stop()
         w = window_ref.get("win")

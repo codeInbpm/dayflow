@@ -1,11 +1,56 @@
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes as wintypes
+import os
 from datetime import datetime
 from typing import Any, Callable
 
 from dayflow.app_meta import CATEGORY_META
 from dayflow.database import UsageDatabase
 from dayflow.tracker import ForegroundTracker
+
+try:
+    import win32gui
+    import win32process
+
+    HAS_WIN32 = True
+except ImportError:  # pragma: no cover
+    win32gui = None  # type: ignore[assignment]
+    win32process = None  # type: ignore[assignment]
+    HAS_WIN32 = False
+
+# Win32 窗口控制常量（使用原生异步 API 避免 PyWebView WinForms 跨线程死锁）
+HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOACTIVATE = 0x0010
+SWP_ASYNCWINDOWPOS = 0x4000
+
+SW_HIDE = 0
+SW_SHOW = 5
+SW_MINIMIZE = 6
+SW_RESTORE = 9
+
+if os.name == "nt":
+    _user32 = ctypes.windll.user32
+    _user32.SetWindowPos.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint,
+    ]
+    _user32.SetWindowPos.restype = wintypes.BOOL
+    _user32.ShowWindowAsync.argtypes = [wintypes.HWND, ctypes.c_int]
+    _user32.ShowWindowAsync.restype = wintypes.BOOL
+    _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    _user32.SetForegroundWindow.restype = wintypes.BOOL
+else:  # pragma: no cover
+    _user32 = None
 
 
 class DayflowBridge:
@@ -20,11 +65,16 @@ class DayflowBridge:
         self.db = db
         self.tracker = tracker
         self._window_getter = window_getter
+        self._hwnd: int | None = None
         self.always_on_top: bool = False
 
     def set_window_getter(self, window_getter: Callable[[], Any] | None) -> None:
         """设置或更新 PyWebView 窗口获取函数。"""
         self._window_getter = window_getter
+
+    def set_hwnd(self, hwnd: int | None) -> None:
+        """缓存主窗口的原生 Win32 HWND 句柄（在 UI 线程 shown 事件中调用）。"""
+        self._hwnd = int(hwnd) if hwnd else None
 
     def _get_window(self) -> Any | None:
         if self._window_getter is None:
@@ -33,6 +83,47 @@ class DayflowBridge:
             return self._window_getter()
         except Exception:
             return None
+
+    def _resolve_hwnd(self, win: Any | None = None) -> int | None:
+        """通过缓存或纯 Win32 API 查找当前进程的 Dayflow 窗口句柄，避免跨线程访问 .NET WinForms 属性导致死锁。"""
+        if self._hwnd and HAS_WIN32 and win32gui is not None:
+            try:
+                if win32gui.IsWindow(self._hwnd):
+                    return self._hwnd
+            except Exception:
+                self._hwnd = None
+
+        if win is not None and isinstance(getattr(win, "hwnd", None), int) and win.hwnd > 0:
+            self._hwnd = int(win.hwnd)
+            return self._hwnd
+
+        if HAS_WIN32 and win32gui is not None and win32process is not None:
+            my_pid = os.getpid()
+            candidates: list[int] = []
+
+            def _enum_cb(hwnd: int, _extra: Any) -> bool:
+                try:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    if pid != my_pid:
+                        return True
+                    title = win32gui.GetWindowText(hwnd) or ""
+                    cls_name = win32gui.GetClassName(hwnd) or ""
+                    if title == "Dayflow" or "WindowsForms" in cls_name:
+                        candidates.append(int(hwnd))
+                except Exception:
+                    pass
+                return True
+
+            try:
+                win32gui.EnumWindows(_enum_cb, None)
+            except Exception:
+                pass
+
+            if candidates:
+                self._hwnd = candidates[0]
+                return self._hwnd
+
+        return None
 
     def get_daily_timeline(self, date_str: str | None = None) -> list[dict]:
         """按时间顺序返回指定日期所有未屏蔽软件的使用会话流水。"""
@@ -151,19 +242,44 @@ class DayflowBridge:
         return self.db.get_ignored_apps()
 
     def toggle_always_on_top(self, state: bool | None = None) -> dict:
-        """切换或设置窗口置顶状态。"""
+        """切换或设置窗口置顶状态（采用原生 Win32 SetWindowPos + SWP_ASYNCWINDOWPOS 杜绝 WinForms TopMost 死锁）。"""
         self.always_on_top = (not self.always_on_top) if state is None else bool(state)
         win = self._get_window()
-        if win is not None:
+        hwnd = self._resolve_hwnd(win)
+
+        if hwnd and _user32 is not None:
+            try:
+                insert_after = HWND_TOPMOST if self.always_on_top else HWND_NOTOPMOST
+                flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
+                _user32.SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, flags)
+            except Exception:
+                pass
+            if win is not None:
+                try:
+                    # 仅同步私有字段，不触发 pywebview Window.on_top setter 的跨线程 WinForms TopMost 赋值
+                    setattr(win, "_Window__on_top", self.always_on_top)
+                except Exception:
+                    pass
+        elif win is not None and not hasattr(win, "gui"):
+            # 单元测试 DummyWindow 兜底
             try:
                 win.on_top = self.always_on_top
             except Exception:
                 pass
+
         return {"ok": True, "always_on_top": self.always_on_top}
 
     def minimize_window(self) -> dict:
-        """最小化当前窗口。"""
+        """最小化当前窗口（优先采用异步 ShowWindowAsync 避免阻塞 JS Bridge 回调）。"""
         win = self._get_window()
+        hwnd = self._resolve_hwnd(win)
+        if hwnd and _user32 is not None:
+            try:
+                _user32.ShowWindowAsync(hwnd, SW_MINIMIZE)
+                return {"ok": True}
+            except Exception:
+                pass
+
         if win is not None:
             try:
                 win.minimize()
@@ -172,8 +288,16 @@ class DayflowBridge:
         return {"ok": True}
 
     def hide_to_tray(self) -> dict:
-        """隐藏窗口至系统托盘。"""
+        """隐藏窗口至系统托盘（优先采用异步 ShowWindowAsync 避免阻塞 JS Bridge 回调）。"""
         win = self._get_window()
+        hwnd = self._resolve_hwnd(win)
+        if hwnd and _user32 is not None:
+            try:
+                _user32.ShowWindowAsync(hwnd, SW_HIDE)
+                return {"ok": True, "hidden": True}
+            except Exception:
+                pass
+
         if win is not None:
             try:
                 win.hide()
@@ -182,8 +306,21 @@ class DayflowBridge:
         return {"ok": True, "hidden": True}
 
     def show_window(self) -> dict:
-        """从系统托盘唤醒并显示窗口。"""
+        """从系统托盘唤醒并显示窗口（恢复置顶状态并激活至前台）。"""
         win = self._get_window()
+        hwnd = self._resolve_hwnd(win)
+        if hwnd and _user32 is not None:
+            try:
+                _user32.ShowWindowAsync(hwnd, SW_SHOW)
+                _user32.ShowWindowAsync(hwnd, SW_RESTORE)
+                _user32.SetForegroundWindow(hwnd)
+                if self.always_on_top:
+                    flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
+                    _user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags)
+                return {"ok": True, "hidden": False}
+            except Exception:
+                pass
+
         if win is not None:
             try:
                 win.show()

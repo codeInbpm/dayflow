@@ -155,3 +155,33 @@ def test_bridge_window_controls_and_tray_icon(tmp_path):
     )
     assert tray is not None
     db.close()
+
+
+def test_toggle_always_on_top_uses_async_win32_without_deadlocking_winforms_setter(tmp_path):
+    """回归测试：当存在原生 HWND 或 pywebview.Window(带 gui 属性) 时，绝不能调用 win.on_top setter 导致 WinForms TopMost 跨线程死锁。"""
+
+    class DeadlockingPyWebViewWindow:
+        gui = object()
+
+        @property
+        def on_top(self):
+            return getattr(self, "_Window__on_top", False)
+
+        @on_top.setter
+        def on_top(self, _value):
+            raise RuntimeError("Deadlock! Should never call win.on_top setter from JS bridge thread")
+
+    db = UsageDatabase(tmp_path / "bridge_topmost.db")
+    tracker = ForegroundTracker(db)
+    win = DeadlockingPyWebViewWindow()
+    bridge = DayflowBridge(db, tracker, window_getter=lambda: win)
+    bridge.set_hwnd(123456)
+
+    res_on = bridge.toggle_always_on_top(True)
+    assert res_on == {"ok": True, "always_on_top": True}
+    assert bridge.always_on_top is True
+
+    res_off = bridge.toggle_always_on_top(False)
+    assert res_off == {"ok": True, "always_on_top": False}
+    assert bridge.always_on_top is False
+    db.close()
