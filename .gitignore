@@ -12,5 +12,7 @@ data/
 .idea/
 build/
 release/
+xianyu_bot/browser_profile/
+xianyu_bot/data/
 .DS_Store
 Thumbs.db
