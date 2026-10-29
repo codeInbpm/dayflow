@@ -236,18 +236,34 @@ def test_bridge_preferences_and_version(tmp_path):
     assert prefs["version"] == "1.0.1"
     assert prefs["idle_detection_enabled"] is True
     assert prefs["health_remind_enabled"] is True
+    assert prefs["rest_remind_interval_sec"] == 1800
+    assert prefs["health_remind_sound"] is True
+    assert prefs["health_remind_dnd_game"] is True
 
     updated = bridge.update_preferences(
         {
             "language": "en",
             "theme": "light",
             "font_scale": 1.15,
+            "rest_remind_interval_sec": 2700,
+            "health_remind_sound": False,
         }
     )
     assert updated["language"] == "en"
     assert updated["theme"] == "light"
     assert updated["font_scale"] == 1.15
     assert updated["version"] == "1.0.1"
+    assert updated["rest_remind_interval_sec"] == 2700
+    assert updated["health_remind_sound"] is False
+
+    # 模拟重启应用：重新实例化 tracker 与 bridge，验证读取保持修改后的持久化值
+    tracker2 = ForegroundTracker(db)
+    bridge2 = DayflowBridge(db, tracker2)
+    prefs_restarted = bridge2.get_preferences()
+    assert prefs_restarted["rest_remind_interval_sec"] == 2700
+    assert prefs_restarted["health_remind_sound"] is False
+    assert tracker2.rest_remind_interval_sec == 2700.0
+    assert tracker2.health_remind_sound is False
 
     # 验证 start_window_resize 对非法方向与无句柄窗口的安全返回
     res_invalid = bridge.start_window_resize("invalid")
@@ -406,3 +422,128 @@ def test_autostart_startup_shortcut_and_preferences(tmp_path, monkeypatch):
     assert any(f.name in ("Dayflow.lnk", "Dayflow.bat") for f in fake_startup.iterdir())
 
     db.close()
+
+
+def test_export_usage_report_csv(tmp_path):
+    """测试第 8 点：CSV 报表导出，验证 1、2 级分类清晰展现与 UTF-8 BOM。"""
+    db = UsageDatabase(tmp_path / "test_export.db")
+    tracker = ForegroundTracker(db)
+    bridge = DayflowBridge(db, tracker)
+
+    # 模拟几个带二级分类的会话
+    bili_win = ActiveWindowInfo(
+        100, 5001, "C:/Program Files/Chrome/chrome.exe", "chrome.exe", "【4K】原神全新演示 - 哔哩哔哩_bilibili", "Chrome_WidgetWin_1"
+    )
+    tracker.tick(datetime(2026, 10, 29, 14, 0, 0), window_info=bili_win)
+    tracker.tick(datetime(2026, 10, 29, 14, 30, 0), window_info=bili_win)
+
+    code_win = ActiveWindowInfo(
+        101, 5002, "C:/Apps/Code.exe", "Code.exe", "main.py - dayflow - Visual Studio Code", "Chrome_WidgetWin_1"
+    )
+    tracker.tick(datetime(2026, 10, 29, 15, 0, 0), window_info=code_win)
+    tracker.tick(datetime(2026, 10, 29, 15, 45, 0), window_info=code_win)
+
+    res = bridge.export_usage_report("2026-10-29", "day")
+    assert res["success"] is True
+    assert res["row_count"] >= 2
+    assert "csv_text" in res
+    assert res["csv_text"].startswith("\ufeff")
+    assert "creative" in res["csv_text"]
+    assert "entertainment" in res["csv_text"]
+    assert "chrome.exe" in res["csv_text"]
+    assert "Code.exe" in res["csv_text"]
+    assert "bilibili" in res["csv_text"].lower()
+
+    db.close()
+
+
+def test_check_and_heal_autostart_path(tmp_path, monkeypatch):
+    """测试第 10 点：自启动路径自愈机制。"""
+    import dayflow.bridge as bridge_mod
+
+    fake_startup = tmp_path / "Startup"
+    fake_startup.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(bridge_mod, "_get_startup_folder", lambda: fake_startup)
+
+    db = UsageDatabase(tmp_path / "test_heal.db")
+    tracker = ForegroundTracker(db)
+    bridge = DayflowBridge(db, tracker)
+
+    # 预设一个旧的错误路径快捷方式批处理
+    old_bat = fake_startup / "Dayflow.bat"
+    old_bat.write_text('@start "" "D:\\OldPath\\Dayflow.exe"\n', encoding="utf-8")
+
+    # 手动触发自愈方法
+    healed = bridge.check_and_heal_autostart_path()
+    assert healed is True
+    # 验证旧路径批处理已被安全清理或自愈为真实路径，且启动文件夹中存在自愈后的启动项
+    if old_bat.exists():
+        assert "OldPath" not in old_bat.read_text(encoding="utf-8")
+    created = [f.name for f in fake_startup.iterdir()]
+    assert any(name in ("Dayflow.lnk", "Dayflow.bat") for name in created)
+    db.close()
+
+
+def test_update_preferences_hotkey(tmp_path):
+    """测试第 9 点：快捷键配置与热重载。"""
+    from dayflow.hotkey import GlobalHotkeyManager
+
+    db = UsageDatabase(tmp_path / "test_hotkey.db")
+    tracker = ForegroundTracker(db)
+    bridge = DayflowBridge(db, tracker)
+
+    hotkey_mgr = GlobalHotkeyManager(on_trigger=lambda: None)
+    bridge.hotkey_mgr = hotkey_mgr
+
+    updated = bridge.update_preferences({"global_hotkey_enabled": True, "global_hotkey": "Ctrl+Shift+D"})
+    assert updated["global_hotkey_enabled"] is True
+    assert updated["global_hotkey"] == "Ctrl+Shift+D"
+
+    # 查库验证持久化
+    prefs = db.get_preferences()
+    assert prefs["global_hotkey_enabled"] is True
+    assert prefs["global_hotkey"] == "Ctrl+Shift+D"
+
+    hotkey_mgr.stop()
+    db.close()
+
+
+def test_quit_app_confirmation_and_cancellation(tmp_path, monkeypatch):
+    """测试右键或关闭前二次确认弹窗机制：用户取消则不关闭，确认后才退出。"""
+    import dayflow.tray as tray_mod
+
+    db = UsageDatabase(tmp_path / "test_quit_confirm.db")
+    tracker = ForegroundTracker(db)
+    quit_calls = []
+    bridge = DayflowBridge(db, tracker, on_quit=lambda: quit_calls.append(True))
+
+    # 1. 模拟用户在确认弹窗中点击了“否 / 取消”
+    monkeypatch.setattr(tray_mod, "ask_quit_confirmation", lambda *args, **kwargs: False)
+    res_cancel = bridge.quit_app(confirm=True)
+    assert res_cancel == {"ok": False, "cancelled": True}
+    assert len(quit_calls) == 0
+
+    # 2. 模拟用户在确认弹窗中点击了“是 / 确定”
+    monkeypatch.setattr(tray_mod, "ask_quit_confirmation", lambda *args, **kwargs: True)
+    res_ok = bridge.quit_app(confirm=True)
+    assert res_ok == {"ok": True, "quitting": True}
+    assert len(quit_calls) == 1
+
+    # 3. 验证托盘右键退出逻辑
+    tray_quits = []
+    tray = TrayController(
+        on_quit=lambda: tray_quits.append(True),
+        confirm_quit=lambda: False,
+    )
+    tray._handle_quit()
+    assert len(tray_quits) == 0  # 取消时不退出
+
+    tray_ok = TrayController(
+        on_quit=lambda: tray_quits.append(True),
+        confirm_quit=lambda: True,
+    )
+    tray_ok._handle_quit()
+    assert len(tray_quits) == 1  # 确认后退出
+
+    db.close()
+

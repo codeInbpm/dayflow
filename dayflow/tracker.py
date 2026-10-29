@@ -13,6 +13,7 @@ from dayflow.database import UsageDatabase
 from dayflow.window_filter import (
     ActiveWindowInfo,
     get_foreground_window_info,
+    is_fullscreen_or_game_active,
     should_track_window,
 )
 
@@ -25,7 +26,7 @@ class _LASTINPUTINFO(ctypes.Structure):
 
 
 def get_system_idle_seconds() -> float:
-    """通过 Windows GetLastInputInfo 获取系统全局无鼠标/键盘操作的空闲秒数。"""
+    """通过 Windows GetLastInputInfo 获取系统全局无鼠标/键盘操作的空闲秒数（优先 64 位防 49 天溢出）。"""
     if os.name != "nt":
         return 0.0
     try:
@@ -34,8 +35,13 @@ def get_system_idle_seconds() -> float:
         lii = _LASTINPUTINFO()
         lii.cbSize = ctypes.sizeof(_LASTINPUTINFO)
         if user32.GetLastInputInfo(ctypes.byref(lii)):
-            millis = kernel32.GetTickCount() - lii.dwTime
-            return max(0.0, float(millis) / 1000.0)
+            if hasattr(kernel32, "GetTickCount64"):
+                tick_now = int(kernel32.GetTickCount64())
+                low32_now = tick_now & 0xFFFFFFFF
+                elapsed_ms = (low32_now - lii.dwTime) & 0xFFFFFFFF
+            else:
+                elapsed_ms = (kernel32.GetTickCount() - lii.dwTime) & 0xFFFFFFFF
+            return max(0.0, float(elapsed_ms) / 1000.0)
     except Exception:
         pass
     return 0.0
@@ -65,7 +71,12 @@ class ForegroundTracker:
         self_pid: int | None = None,
         idle_threshold_sec: float = 180.0,
         idle_detector: Callable[[], float] | None = None,
-        rest_remind_interval_sec: float = 2700.0,
+        rest_remind_interval_sec: float = 1800.0,
+        health_remind_enabled: bool = True,
+        health_remind_sound: bool = True,
+        health_remind_dnd_game: bool = True,
+        fullscreen_checker: Callable[[], bool] | None = None,
+        on_health_remind: Callable[[float], object] | None = None,
     ) -> None:
         self.db = db
         self.poll_interval = float(poll_interval)
@@ -79,8 +90,14 @@ class ForegroundTracker:
         self.is_idle: bool = False
         self.current_idle_sec: float = 0.0
 
-        # 2. 连续专注用眼/久坐疲劳微光提醒配置（默认连续活跃 45 分钟提醒一次）
-        self.rest_remind_interval_sec = float(rest_remind_interval_sec)
+        # 2. 连续专注用眼/久坐疲劳微光提醒配置（默认 30 分钟 (1800秒) 提醒一次）
+        self.health_remind_enabled: bool = bool(health_remind_enabled)
+        self.rest_remind_interval_sec: float = float(rest_remind_interval_sec)
+        self.health_remind_sound: bool = bool(health_remind_sound)
+        self.health_remind_dnd_game: bool = bool(health_remind_dnd_game)
+        self._custom_fullscreen_checker = fullscreen_checker is not None
+        self._fullscreen_checker = fullscreen_checker or is_fullscreen_or_game_active
+        self._on_health_remind = on_health_remind
         self.continuous_active_sec: float = 0.0
         self._health_remind_pending: bool = False
 
@@ -149,6 +166,31 @@ class ForegroundTracker:
             return self._current.last_tick_dt
         return now
 
+    def _check_and_trigger_health_remind(self, is_simulated: bool = False) -> None:
+        """检查连续专注久坐时长是否达到设定阈值，若未被全屏免打扰拦截则触发提醒回调。"""
+        if not self.health_remind_enabled:
+            return
+        if self.continuous_active_sec < self.rest_remind_interval_sec:
+            return
+        if self._health_remind_pending:
+            return
+
+        # 检查全屏游戏免打扰状态
+        if self.health_remind_dnd_game:
+            if self._custom_fullscreen_checker:
+                if self._fullscreen_checker():
+                    return
+            elif not is_simulated:
+                if self._fullscreen_checker():
+                    return
+
+        self._health_remind_pending = True
+        if self._on_health_remind is not None:
+            try:
+                self._on_health_remind(self.continuous_active_sec)
+            except Exception:
+                pass
+
     def check_and_consume_health_remind(self) -> bool:
         """检查并消耗疲劳提醒状态（前端调用后重置）。"""
         with self._lock:
@@ -189,9 +231,10 @@ class ForegroundTracker:
                         self._commit_current_until(end_dt)
                         self._current = None
                     self.is_idle = True
-                    # 离线超过休息间隔的一半视为真正休息，重置连续专注计时
+                    # 离线超过休息间隔的一半视为真正休息，重置连续专注计时与提醒横幅
                     if self.current_idle_sec >= 120.0:
                         self.continuous_active_sec = 0.0
+                        self._health_remind_pending = False
                 return
 
             # 用户有键盘或鼠标操作，解除挂机状态
@@ -259,11 +302,7 @@ class ForegroundTracker:
                     self._current.window_title = info.window_title
 
                 # 检查是否触发疲劳久坐提醒
-                if (
-                    self.continuous_active_sec >= self.rest_remind_interval_sec
-                    and not self._health_remind_pending
-                ):
-                    self._health_remind_pending = True
+                self._check_and_trigger_health_remind(is_simulated=(now is not None))
 
                 elapsed = (
                     self._current.last_tick_dt - self._current.start_dt
@@ -287,6 +326,7 @@ class ForegroundTracker:
                 last_tick_dt=cur_now,
             )
             self.continuous_active_sec += self.poll_interval
+            self._check_and_trigger_health_remind(is_simulated=(now is not None))
 
     def flush(self, now: datetime | None = None) -> None:
         """立即将当前内存中尚未落盘的活跃会话时长写入数据库。"""

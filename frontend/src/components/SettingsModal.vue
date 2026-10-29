@@ -1,6 +1,6 @@
 <script setup>
-import { computed, ref } from 'vue'
-import { Settings, Info, X, ChevronsUpDown, Check } from 'lucide-vue-next'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { Settings, Info, X, ChevronsUpDown, Check, Keyboard, RotateCcw } from 'lucide-vue-next'
 import {
   appPreferences,
   FONT_SCALE_STEPS,
@@ -77,6 +77,7 @@ const fontSliderPercent = computed(() => {
 function closeModal() {
   langMenuOpen.value = false
   themeMenuOpen.value = false
+  isRecordingHotkey.value = false
   emit('update:modelValue', false)
 }
 
@@ -127,9 +128,146 @@ async function handleToggleTopMost() {
   emit('update:alwaysOnTop', finalState)
 }
 
+const intervalOptions = computed(() => [
+  { sec: 1200, label: t.value.min20 },
+  { sec: 1800, label: t.value.min30Default },
+  { sec: 2700, label: t.value.min45 },
+  { sec: 3600, label: t.value.min60 },
+  { sec: 5400, label: t.value.min90 },
+])
+
+const customIntervalMinInput = ref(
+  Math.round((appPreferences.rest_remind_interval_sec || 1800) / 60)
+)
+
+watch(
+  () => appPreferences.rest_remind_interval_sec,
+  (val) => {
+    customIntervalMinInput.value = Math.round((val || 1800) / 60)
+  }
+)
+
+async function handleToggleHealthRemind() {
+  const nextVal = !appPreferences.health_remind_enabled
+  await updatePref({ health_remind_enabled: nextVal })
+}
+
+async function handleSelectInterval(sec) {
+  customIntervalMinInput.value = Math.round(sec / 60)
+  await updatePref({ rest_remind_interval_sec: sec })
+}
+
+async function handleCommitCustomInterval() {
+  let val = parseInt(customIntervalMinInput.value, 10)
+  if (isNaN(val)) val = 30
+  if (val < 5) val = 5
+  if (val > 240) val = 240
+  customIntervalMinInput.value = val
+  await updatePref({ rest_remind_interval_sec: val * 60 })
+}
+
+async function handleToggleDndGame() {
+  const nextVal = !appPreferences.health_remind_dnd_game
+  await updatePref({ health_remind_dnd_game: nextVal })
+}
+
+async function handleToggleRemindSound() {
+  const nextVal = !appPreferences.health_remind_sound
+  await updatePref({ health_remind_sound: nextVal })
+}
+
 function handleCheckUpdate() {
   updateChecked.value = true
 }
+
+// 全局呼出快捷键（微信同款：直接按键捕获）
+const isRecordingHotkey = ref(false)
+const hotkeySavedTip = ref(false)
+
+const currentHotkeyDisplay = computed(() => {
+  if (isRecordingHotkey.value) {
+    return t.value.pressShortcut || '按下快捷键'
+  }
+  return appPreferences.global_hotkey || 'Ctrl+Shift+D'
+})
+
+async function handleToggleHotkey() {
+  const nextVal = !appPreferences.global_hotkey_enabled
+  await updatePref({ global_hotkey_enabled: nextVal })
+}
+
+function startRecordHotkey() {
+  isRecordingHotkey.value = true
+}
+
+async function handleResetDefaultHotkey() {
+  isRecordingHotkey.value = false
+  await updatePref({ global_hotkey: 'Ctrl+Shift+D' })
+  showHotkeySaved()
+}
+
+function handleHotkeyKeyDown(e) {
+  if (!isRecordingHotkey.value) return
+  e.preventDefault()
+  e.stopPropagation()
+
+  if (e.key === 'Escape') {
+    isRecordingHotkey.value = false
+    return
+  }
+
+  // 仅按下修饰键时不提交
+  if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
+    return
+  }
+
+  const parts = []
+  if (e.ctrlKey) parts.push('Ctrl')
+  if (e.shiftKey) parts.push('Shift')
+  if (e.altKey) parts.push('Alt')
+
+  let keyName = e.key.toUpperCase()
+  if (e.code && e.code.startsWith('Key')) {
+    keyName = e.code.slice(3)
+  } else if (e.code && e.code.startsWith('Digit')) {
+    keyName = e.code.slice(5)
+  } else if (e.code && e.code.startsWith('Numpad')) {
+    keyName = e.code.slice(6)
+  } else if (e.key === ' ') {
+    keyName = 'Space'
+  }
+
+  // 单字母不可直接作为全局快捷键
+  if (parts.length === 0 && !keyName.startsWith('F')) {
+    return
+  }
+
+  parts.push(keyName)
+  const fullKey = parts.join('+')
+
+  isRecordingHotkey.value = false
+  updatePref({ global_hotkey: fullKey })
+  showHotkeySaved()
+}
+
+function showHotkeySaved() {
+  hotkeySavedTip.value = true
+  setTimeout(() => {
+    hotkeySavedTip.value = false
+  }, 2000)
+}
+
+onMounted(() => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', handleHotkeyKeyDown, true)
+  }
+})
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('keydown', handleHotkeyKeyDown, true)
+  }
+})
 </script>
 
 <template>
@@ -519,6 +657,272 @@ function handleCheckUpdate() {
                   />
                 </button>
               </div>
+            </div>
+
+            <!-- 卡片 4：专注久坐健康关怀与系统提醒 (Health & Focus Guard) -->
+            <div
+              class="rounded-xl p-3.5 border space-y-3.5 transition-colors"
+              :class="
+                isLight
+                  ? 'bg-white border-black/[0.05] shadow-[0_1px_3px_rgba(0,0,0,0.03)]'
+                  : 'bg-[#23232B] border-white/[0.06]'
+              "
+            >
+              <!-- 久坐提醒总开关 -->
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-[13px] font-medium">{{ t.labelHealthGuard }}</div>
+                  <div class="text-[11px] text-zinc-400 mt-0.5 leading-snug">
+                    {{ t.descHealthGuard }}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  role="switch"
+                  :aria-checked="appPreferences.health_remind_enabled"
+                  class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                  :class="
+                    appPreferences.health_remind_enabled
+                      ? 'bg-[#07C160]'
+                      : isLight
+                        ? 'bg-zinc-300'
+                        : 'bg-zinc-600'
+                  "
+                  @click="handleToggleHealthRemind"
+                >
+                  <span
+                    class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                    :class="appPreferences.health_remind_enabled ? 'translate-x-4' : 'translate-x-0'"
+                  />
+                </button>
+              </div>
+
+              <!-- 当启用久坐提醒时，展示提醒时长与免打扰/声音细项 -->
+              <template v-if="appPreferences.health_remind_enabled">
+                <div
+                  class="h-px"
+                  :class="isLight ? 'bg-black/[0.06]' : 'bg-white/[0.06]'"
+                ></div>
+
+                <!-- 提醒时长胶囊选择器 (默认 30 分钟，修改后持久化保存) -->
+                <div class="space-y-1.5">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[12px] font-medium text-zinc-300">{{ t.labelRemindInterval }}</span>
+                    <span class="text-[11px] text-emerald-400 font-mono font-medium">
+                      {{ Math.round((appPreferences.rest_remind_interval_sec || 1800) / 60) }} min
+                    </span>
+                  </div>
+                  <div class="grid grid-cols-5 gap-1">
+                    <button
+                      v-for="opt in intervalOptions"
+                      :key="opt.sec"
+                      type="button"
+                      class="px-1.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer text-center truncate"
+                      :class="
+                        (appPreferences.rest_remind_interval_sec || 1800) === opt.sec
+                          ? 'bg-[#07C160] text-white shadow-xs'
+                          : isLight
+                            ? 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                            : 'bg-white/[0.05] text-zinc-400 hover:bg-white/[0.1] hover:text-zinc-200'
+                      "
+                      @click="handleSelectInterval(opt.sec)"
+                    >
+                      {{ opt.label }}
+                    </button>
+                  </div>
+
+                  <!-- 自定义提醒分钟输入 (带 5~240 校验) -->
+                  <div class="flex items-center justify-between pt-1">
+                    <span class="text-[11px] text-zinc-400">{{ t.customIntervalTip }}</span>
+                    <div class="flex items-center gap-1.5">
+                      <input
+                        v-model.number="customIntervalMinInput"
+                        type="number"
+                        min="5"
+                        max="240"
+                        class="w-14 px-1.5 py-0.5 rounded-md text-center font-mono text-[11.5px] border focus:outline-none focus:ring-1 focus:ring-[#07C160]"
+                        :class="
+                          isLight
+                            ? 'bg-zinc-50 border-black/15 text-zinc-900'
+                            : 'bg-black/30 border-white/15 text-zinc-100'
+                        "
+                        @blur="handleCommitCustomInterval"
+                        @keydown.enter="handleCommitCustomInterval"
+                      />
+                      <span class="text-[11px] text-zinc-400">min</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  class="h-px"
+                  :class="isLight ? 'bg-black/[0.06]' : 'bg-white/[0.06]'"
+                ></div>
+
+                <!-- 游戏与全屏演示免打扰 -->
+                <div class="flex items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="text-[12.5px] font-medium">{{ t.labelDndGame }}</div>
+                    <div class="text-[10.5px] text-zinc-400 mt-0.5 leading-snug">
+                      {{ t.descDndGame }}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    role="switch"
+                    :aria-checked="appPreferences.health_remind_dnd_game"
+                    class="relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                    :class="
+                      appPreferences.health_remind_dnd_game
+                        ? 'bg-[#07C160]'
+                        : isLight
+                          ? 'bg-zinc-300'
+                          : 'bg-zinc-600'
+                    "
+                    @click="handleToggleDndGame"
+                  >
+                    <span
+                      class="pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                      :class="appPreferences.health_remind_dnd_game ? 'translate-x-3.5' : 'translate-x-0'"
+                    />
+                  </button>
+                </div>
+
+                <div
+                  class="h-px"
+                  :class="isLight ? 'bg-black/[0.06]' : 'bg-white/[0.06]'"
+                ></div>
+
+                <!-- 系统通知柔和提示音 -->
+                <div class="flex items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="text-[12.5px] font-medium">{{ t.labelRemindSound }}</div>
+                    <div class="text-[10.5px] text-zinc-400 mt-0.5 leading-snug">
+                      {{ t.descRemindSound }}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    role="switch"
+                    :aria-checked="appPreferences.health_remind_sound"
+                    class="relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                    :class="
+                      appPreferences.health_remind_sound
+                        ? 'bg-[#07C160]'
+                        : isLight
+                          ? 'bg-zinc-300'
+                          : 'bg-zinc-600'
+                    "
+                    @click="handleToggleRemindSound"
+                  >
+                    <span
+                      class="pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                      :class="appPreferences.health_remind_sound ? 'translate-x-3.5' : 'translate-x-0'"
+                    />
+                  </button>
+                </div>
+              </template>
+            </div>
+
+            <!-- 卡片 5：全局唤出/隐藏快捷键 (微信同款按键直接捕获) -->
+            <div
+              class="rounded-xl p-3.5 border space-y-3 transition-colors"
+              :class="
+                isLight
+                  ? 'bg-white border-black/[0.05] shadow-[0_1px_3px_rgba(0,0,0,0.03)]'
+                  : 'bg-[#23232B] border-white/[0.06]'
+              "
+            >
+              <!-- 快捷键总开关 -->
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-[13px] font-medium flex items-center gap-1.5">
+                    <Keyboard class="w-3.5 h-3.5 text-[#07C160]" />
+                    <span>{{ t.labelGlobalHotkey }}</span>
+                  </div>
+                  <div class="text-[11px] text-zinc-400 mt-0.5 leading-snug">
+                    {{ t.descGlobalHotkey }}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  role="switch"
+                  :aria-checked="appPreferences.global_hotkey_enabled"
+                  class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                  :class="
+                    appPreferences.global_hotkey_enabled
+                      ? 'bg-[#07C160]'
+                      : isLight
+                        ? 'bg-zinc-300'
+                        : 'bg-zinc-600'
+                  "
+                  @click="handleToggleHotkey"
+                >
+                  <span
+                    class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                    :class="appPreferences.global_hotkey_enabled ? 'translate-x-4' : 'translate-x-0'"
+                  />
+                </button>
+              </div>
+
+              <!-- 快捷键直接按键设置区（微信图2样式：点击按下快捷键） -->
+              <template v-if="appPreferences.global_hotkey_enabled">
+                <div
+                  class="h-px"
+                  :class="isLight ? 'bg-black/[0.06]' : 'bg-white/[0.06]'"
+                ></div>
+
+                <div class="flex items-center justify-between gap-3 pt-0.5">
+                  <span class="text-[12px] text-zinc-300 font-medium truncate">
+                    显示/隐藏 Dayflow 窗口
+                  </span>
+
+                  <!-- 微信同款快捷键捕获按钮 -->
+                  <button
+                    type="button"
+                    class="min-w-[108px] px-3 py-1.5 rounded-lg text-[12px] font-mono font-medium transition-all cursor-pointer border text-center"
+                    :class="
+                      isRecordingHotkey
+                        ? 'border-[#07C160] text-[#07C160] bg-[#07C160]/10 ring-2 ring-[#07C160]/30 animate-pulse'
+                        : isLight
+                          ? 'bg-zinc-100 hover:bg-zinc-200 border-black/10 text-zinc-800'
+                          : 'bg-white/[0.07] hover:bg-white/[0.12] border-white/10 text-zinc-200'
+                    "
+                    @click="startRecordHotkey"
+                  >
+                    {{ currentHotkeyDisplay }}
+                  </button>
+                </div>
+
+                <!-- 恢复默认设置与生效提示 -->
+                <div class="flex items-center justify-between pt-1">
+                  <span
+                    v-if="hotkeySavedTip"
+                    class="text-[10.5px] text-[#07C160] font-medium"
+                  >
+                    ✓ {{ t.hotkeySavedSuccess }}
+                  </span>
+                  <span v-else-if="isRecordingHotkey" class="text-[10.5px] text-amber-400">
+                    请直接在键盘上按下组合键 (Esc取消)
+                  </span>
+                  <span v-else class="text-[10.5px] text-zinc-400">
+                    点击按钮后在键盘直接按下快捷键即可
+                  </span>
+
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+                    @click="handleResetDefaultHotkey"
+                  >
+                    <RotateCcw class="w-3 h-3" />
+                    <span>{{ t.resetDefaultShortcut }}</span>
+                  </button>
+                </div>
+              </template>
             </div>
           </div>
 

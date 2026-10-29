@@ -8,6 +8,7 @@ import {
   Minus,
   FilterX,
   RotateCcw,
+  Download,
 } from 'lucide-vue-next'
 import HourlyBarChart from './HourlyBarChart.vue'
 import { CATEGORY_META, formatDuration } from '../api/bridge'
@@ -83,6 +84,7 @@ const emit = defineEmits([
   'update:selectedHour',
   'select-category',
   'update:selectedCategory',
+  'open-export',
 ])
 
 const t = computed(() => i18n.value)
@@ -344,24 +346,41 @@ function handleCategoryClick(catKey) {
         </button>
       </div>
 
-      <!-- 右上角：若选中了某小时则显示清除过滤按钮，否则显示实时采集状态点 -->
-      <button
-        v-if="resolvedPeriod === 'day' && selectedHour !== null && selectedHour !== undefined"
-        type="button"
-        class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-[11px] font-medium hover:bg-blue-500/25 transition-colors cursor-pointer"
-        :class="isLight ? 'text-blue-600' : 'text-blue-300'"
-        @click="handleHourSelect(null)"
-      >
-        <FilterX class="w-3 h-3" />
-        <span>{{ t.hourFilterBadge.replace('{hour}', String(selectedHour).padStart(2, '0')) }}</span>
-      </button>
+      <!-- 右上角：导出明细报表按钮 + 状态指示 -->
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button
+          type="button"
+          :title="t.exportReportBtn"
+          class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer border"
+          :class="
+            isLight
+              ? 'bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200/60'
+              : 'bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border-blue-500/25'
+          "
+          @click="emit('open-export')"
+        >
+          <Download class="w-3 h-3" />
+          <span>{{ t.exportReportBtn }}</span>
+        </button>
 
-      <div
-        v-else
-        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.03] border border-white/[0.05] text-[11px] text-zinc-400"
-      >
-        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span>{{ resolvedActiveApp ? t.statusCollecting : t.statusReady }}</span>
+        <button
+          v-if="resolvedPeriod === 'day' && selectedHour !== null && selectedHour !== undefined"
+          type="button"
+          class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-[11px] font-medium hover:bg-blue-500/25 transition-colors cursor-pointer"
+          :class="isLight ? 'text-blue-600' : 'text-blue-300'"
+          @click="handleHourSelect(null)"
+        >
+          <FilterX class="w-3 h-3" />
+          <span>{{ t.hourFilterBadge.replace('{hour}', String(selectedHour).padStart(2, '0')) }}</span>
+        </button>
+
+        <div
+          v-else
+          class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.03] border border-white/[0.05] text-[11px] text-zinc-400"
+        >
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>{{ resolvedActiveApp ? t.statusCollecting : t.statusReady }}</span>
+        </div>
       </div>
     </div>
 

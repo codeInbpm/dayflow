@@ -46,6 +46,7 @@ const emit = defineEmits([
   'open-settings',
   'minimize',
   'close',
+  'request-quit',
 ])
 
 const isPinned = ref(props.alwaysOnTop)
@@ -93,9 +94,8 @@ async function handleMinimize() {
   emit('minimize')
 }
 
-async function handleCloseApp() {
-  await quitApp()
-  emit('close')
+function handleCloseApp() {
+  emit('request-quit')
 }
 
 function handleDragPointerDown(e) {

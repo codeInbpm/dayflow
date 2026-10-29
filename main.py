@@ -13,7 +13,7 @@ from typing import Any
 from dayflow.bridge import DayflowBridge
 from dayflow.database import UsageDatabase
 from dayflow.tracker import ForegroundTracker
-from dayflow.tray import TrayController, create_tray_icon_image
+from dayflow.tray import TrayController, create_tray_icon_image, ask_quit_confirmation
 
 
 def get_resource_dir() -> Path:
@@ -216,8 +216,22 @@ def run_desktop_app(
         except Exception:
             pass
 
+    def _prompt_in_app_quit() -> None:
+        """唤醒主窗口并在应用内居中弹出退出确认弹窗。"""
+        bridge.show_window()
+        try:
+            win.evaluate_js("window.dayflowShowQuitConfirm && window.dayflowShowQuitConfirm()")
+        except Exception:
+            pass
+
+    def _on_window_closing() -> bool:
+        # 任务栏右键“关闭窗口”或 Alt+F4 拦截：在应用内居中提示确认，避免直接强退
+        _prompt_in_app_quit()
+        return False
+
     try:
         win.events.shown += _on_window_shown
+        win.events.closing += _on_window_closing
     except Exception:
         pass
 
@@ -227,6 +241,7 @@ def run_desktop_app(
         # 立即隐藏主窗口，随后落盘关闭数据库并直接终止进程（不等待 1s 轮询线程 sleep 周期，实现毫秒级瞬时关闭）
         try:
             bridge.stop_edge_autohide_monitor()
+            bridge.hotkey_mgr.stop()
             bridge.hide_to_tray()
         except Exception:
             pass
@@ -252,8 +267,10 @@ def run_desktop_app(
         on_toggle_top=bridge.toggle_always_on_top,
         is_on_top=lambda: bridge.always_on_top,
         on_quit=quit_app,
+        confirm_quit=lambda: (_prompt_in_app_quit() or False),
     )
     tray_ref["tray"] = tray
+    bridge.set_tray(tray)
 
     tracker.start()
     tray.start()

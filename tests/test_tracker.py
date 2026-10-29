@@ -146,3 +146,38 @@ def test_tracker_health_focus_guard_reminder(tmp_path):
     assert tracker.check_and_consume_health_remind() is True
     # 再次读取时已经被 consume，返回 False 避免频繁打扰
     assert tracker.check_and_consume_health_remind() is False
+
+
+def test_tracker_game_dnd_and_system_notification_callback(tmp_path):
+    db = UsageDatabase(tmp_path / "tracker_dnd.db")
+    mock_fullscreen = [True]  # 模拟用户当前处于全屏游戏或演示中
+    remind_callbacks = []
+
+    tracker = ForegroundTracker(
+        db,
+        poll_interval=1.0,
+        idle_threshold_sec=300.0,
+        idle_detector=lambda: 0.0,
+        rest_remind_interval_sec=10.0,
+        health_remind_dnd_game=True,
+        fullscreen_checker=lambda: mock_fullscreen[0],
+        on_health_remind=lambda sec: remind_callbacks.append(sec),
+    )
+
+    game = ActiveWindowInfo(
+        100, 5001, "C:/Games/LOL/LeagueClient.exe", "LeagueClient.exe", "英雄联盟", "RiotWindowClass"
+    )
+
+    tracker.tick(datetime(2026, 10, 29, 20, 0, 0), window_info=game)
+    # 连续专注超过 15 秒，但由于处于全屏游戏中 (mock_fullscreen == True)，免打扰生效，不弹窗！
+    tracker.tick(datetime(2026, 10, 29, 20, 0, 15), window_info=game)
+    assert len(remind_callbacks) == 0
+    assert tracker._health_remind_pending is False
+
+    # 用户打完这把游戏，切出全屏游戏 (mock_fullscreen == False)
+    mock_fullscreen[0] = False
+    tracker.tick(datetime(2026, 10, 29, 20, 0, 16), window_info=game)
+    # 退出全屏后立刻温柔推送！
+    assert len(remind_callbacks) == 1
+    assert remind_callbacks[0] >= 16.0
+    assert tracker._health_remind_pending is True

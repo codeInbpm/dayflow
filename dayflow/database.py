@@ -439,11 +439,19 @@ class UsageDatabase:
         with self._lock, self._conn:
             updates: list[str] = []
             params: list[object] = []
+            old_cat: str | None = None
+            norm_cat: str | None = None
 
             if category is not None:
+                old_row = self._conn.execute(
+                    "SELECT category FROM apps WHERE id = ?", (app_id,)
+                ).fetchone()
+                if old_row is not None:
+                    old_cat = str(old_row["category"])
                 norm_cat = category if category in CATEGORIES else "other"
                 updates.append("category = ?")
                 params.append(norm_cat)
+
             if display_name is not None:
                 updates.append("display_name = ?")
                 params.append(display_name)
@@ -457,6 +465,15 @@ class UsageDatabase:
                     f"UPDATE apps SET {', '.join(updates)} WHERE id = ?",
                     tuple(params),
                 )
+                if norm_cat is not None and norm_cat != old_cat:
+                    self._conn.execute(
+                        """
+                        UPDATE usage_sessions
+                        SET category = ?
+                        WHERE app_id = ? AND (category IS NULL OR category = '' OR category = ?)
+                        """,
+                        (norm_cat, app_id, old_cat or ""),
+                    )
 
             row = self._conn.execute(
                 """
@@ -916,12 +933,18 @@ class UsageDatabase:
             }
 
     def get_preferences(self) -> dict[str, object]:
-        """获取用户偏好设置（语言、外观主题、字体缩放级别、开机自启标记）。"""
+        """获取用户偏好设置（语言、外观主题、字体缩放级别、开机自启、久坐提醒配置、空闲挂机配置）。"""
         defaults: dict[str, object] = {
             "language": "system",  # 'system' | 'zh-CN' | 'en' | 'zh-TW'
             "theme": "dark",       # 'system' | 'dark' | 'light'
-            "font_scale": 1.0,     # 0.92 ~ 1.20
+            "font_scale": 1.0,     # 0.85 ~ 1.30
             "auto_start": False,
+            "health_remind_enabled": True,
+            "rest_remind_interval_sec": 1800,  # 默认 30 分钟 (1800秒)
+            "health_remind_sound": True,
+            "health_remind_dnd_game": True,
+            "idle_detection_enabled": True,
+            "idle_threshold_sec": 180,
         }
         with self._lock:
             rows = self._conn.execute("SELECT key, value FROM user_preferences").fetchall()
@@ -942,15 +965,45 @@ class UsageDatabase:
             font_scale = 1.0
 
         auto_start = raw.get("auto_start", "0") in ("1", "true", "True")
+
+        health_remind_enabled = raw.get("health_remind_enabled", "1") in ("1", "true", "True")
+
+        try:
+            rest_remind_interval_sec = int(raw.get("rest_remind_interval_sec", "1800"))
+            rest_remind_interval_sec = max(300, min(14400, rest_remind_interval_sec))
+        except Exception:
+            rest_remind_interval_sec = 1800
+
+        health_remind_sound = raw.get("health_remind_sound", "1") in ("1", "true", "True")
+        health_remind_dnd_game = raw.get("health_remind_dnd_game", "1") in ("1", "true", "True")
+        idle_detection_enabled = raw.get("idle_detection_enabled", "1") in ("1", "true", "True")
+
+        try:
+            idle_threshold_sec = int(raw.get("idle_threshold_sec", "180"))
+            idle_threshold_sec = max(30, min(3600, idle_threshold_sec))
+        except Exception:
+            idle_threshold_sec = 180
+
+        global_hotkey_enabled = raw.get("global_hotkey_enabled", "1") in ("1", "true", "True")
+        global_hotkey = str(raw.get("global_hotkey", "Ctrl+Shift+D")).strip() or "Ctrl+Shift+D"
+
         return {
             "language": lang,
             "theme": theme,
             "font_scale": font_scale,
             "auto_start": auto_start,
+            "health_remind_enabled": health_remind_enabled,
+            "rest_remind_interval_sec": rest_remind_interval_sec,
+            "health_remind_sound": health_remind_sound,
+            "health_remind_dnd_game": health_remind_dnd_game,
+            "idle_detection_enabled": idle_detection_enabled,
+            "idle_threshold_sec": idle_threshold_sec,
+            "global_hotkey_enabled": global_hotkey_enabled,
+            "global_hotkey": global_hotkey,
         }
 
     def update_preferences(self, updates: dict[str, object]) -> dict[str, object]:
-        """更新并保存用户偏好设置。"""
+        """更新并保存用户偏好设置，持久化至 SQLite 数据库。"""
         current = self.get_preferences()
         merged = {**current, **(updates or {})}
 
@@ -969,12 +1022,40 @@ class UsageDatabase:
             font_scale = 1.0
 
         auto_start = bool(merged.get("auto_start", False))
+        health_remind_enabled = bool(merged.get("health_remind_enabled", True))
+
+        try:
+            rest_remind_interval_sec = int(merged.get("rest_remind_interval_sec", 1800))
+            rest_remind_interval_sec = max(300, min(14400, rest_remind_interval_sec))
+        except Exception:
+            rest_remind_interval_sec = 1800
+
+        health_remind_sound = bool(merged.get("health_remind_sound", True))
+        health_remind_dnd_game = bool(merged.get("health_remind_dnd_game", True))
+        idle_detection_enabled = bool(merged.get("idle_detection_enabled", True))
+
+        try:
+            idle_threshold_sec = int(merged.get("idle_threshold_sec", 180))
+            idle_threshold_sec = max(30, min(3600, idle_threshold_sec))
+        except Exception:
+            idle_threshold_sec = 180
+
+        global_hotkey_enabled = bool(merged.get("global_hotkey_enabled", True))
+        global_hotkey = str(merged.get("global_hotkey", "Ctrl+Shift+D")).strip() or "Ctrl+Shift+D"
 
         to_store = {
             "language": lang,
             "theme": theme,
             "font_scale": str(font_scale),
             "auto_start": "1" if auto_start else "0",
+            "health_remind_enabled": "1" if health_remind_enabled else "0",
+            "rest_remind_interval_sec": str(rest_remind_interval_sec),
+            "health_remind_sound": "1" if health_remind_sound else "0",
+            "health_remind_dnd_game": "1" if health_remind_dnd_game else "0",
+            "idle_detection_enabled": "1" if idle_detection_enabled else "0",
+            "idle_threshold_sec": str(idle_threshold_sec),
+            "global_hotkey_enabled": "1" if global_hotkey_enabled else "0",
+            "global_hotkey": global_hotkey,
         }
         with self._lock, self._conn:
             for k, v in to_store.items():
@@ -987,3 +1068,195 @@ class UsageDatabase:
                     (k, v),
                 )
         return self.get_preferences()
+
+    def export_usage_csv_text(
+        self, date_str: str | None = None, period: str = "day"
+    ) -> str:
+        """导出规范详细的 CSV 报表文本（包含 1 级、2 级分类明确模板，带 UTF-8 BOM）。"""
+        import csv
+        import io
+
+        target_date = date_str or datetime.now().strftime("%Y-%m-%d")
+
+        # 确定起止日期
+        if period == "week":
+            base_dt = datetime.strptime(target_date, "%Y-%m-%d")
+            start_dt = base_dt - timedelta(days=base_dt.weekday())
+            end_dt = start_dt + timedelta(days=6)
+            start_str = start_dt.strftime("%Y-%m-%d")
+            end_str = end_dt.strftime("%Y-%m-%d")
+            period_label = f"周报 ({start_str} ~ {end_str})"
+        elif period == "month":
+            parts = [int(p) for p in target_date.split("-")]
+            y, m = parts[0], parts[1]
+            last_day = calendar.monthrange(y, m)[1]
+            start_str = f"{y:04d}-{m:02d}-01"
+            end_str = f"{y:04d}-{m:02d}-{last_day:02d}"
+            period_label = f"月报 ({y}年{m}月)"
+        else:
+            start_str = target_date
+            end_str = target_date
+            period_label = f"日报 ({target_date})"
+
+        with self._lock:
+            # 1. 查询会话明细
+            rows = self._conn.execute(
+                """
+                SELECT 
+                    s.date_str,
+                    s.start_time,
+                    s.end_time,
+                    s.duration_sec,
+                    s.hour_bucket,
+                    s.last_window_title,
+                    a.display_name,
+                    a.exe_name,
+                    a.category AS base_category,
+                    COALESCE(s.category, a.category) AS session_category
+                FROM usage_sessions s
+                JOIN apps a ON a.id = s.app_id
+                WHERE s.date_str BETWEEN ? AND ? AND a.is_ignored = 0
+                ORDER BY s.date_str ASC, s.hour_bucket ASC, s.start_time ASC, s.id ASC
+                """,
+                (start_str, end_str),
+            ).fetchall()
+
+            # 2. 查询一级分类汇总
+            cat_rows = self._conn.execute(
+                """
+                SELECT COALESCE(s.category, a.category) AS category, COALESCE(SUM(s.duration_sec), 0) AS sec
+                FROM usage_sessions s
+                JOIN apps a ON a.id = s.app_id
+                WHERE s.date_str BETWEEN ? AND ? AND a.is_ignored = 0
+                GROUP BY COALESCE(s.category, a.category)
+                """,
+                (start_str, end_str),
+            ).fetchall()
+
+        total_sec = sum(int(r["duration_sec"]) for r in rows)
+
+        def _fmt_dur(sec: int) -> str:
+            h = sec // 3600
+            m = (sec % 3600) // 60
+            s = sec % 60
+            if h > 0:
+                return f"{h}小时{m}分{s}秒"
+            if m > 0:
+                return f"{m}分{s}秒"
+            return f"{s}秒"
+
+        def _resolve_sub_cat(exe_name: str, window_title: str, pri_cat: str) -> str:
+            low_t = (window_title or "").lower()
+            low_e = (exe_name or "").lower()
+            if any(k in low_t for k in ("bilibili", "哔哩哔哩", "b站")):
+                return "B站视频播放 (影音娱乐)"
+            if any(k in low_t for k in ("youtube", "youtu.be")):
+                return "YouTube 视频流媒体 (影音娱乐)"
+            if any(k in low_t for k in ("网易云音乐", "cloudmusic", "qq音乐", "kugou")):
+                return "在线音乐与电台 (影音娱乐)"
+            if any(k in low_t for k in ("爱奇艺", "iqiyi", "腾讯视频", "优酷", "youku", "netflix", "twitch")):
+                return "影视长视频 (影音娱乐)"
+            if any(k in low_e for k in ("lol", "league", "genshin", "steam", "epic", "dota", "valorant", "game")):
+                return "电脑游戏客户端 (影音娱乐)"
+            if any(k in low_t for k in ("github", "gitlab", "gitee")):
+                return "代码托管与PR协作 (开发创意)"
+            if any(k in low_t for k in ("chatgpt", "claude", "deepseek", "kimi", "openai")):
+                return "AI大模型对话助手 (开发创意)"
+            if any(k in low_t for k in ("stackoverflow", "v2ex", "leetcode", "掘金", "segmentfault")):
+                return "技术社区与题库 (开发创意)"
+            if any(k in low_t for k in ("figma", "mastergo", "pixso", "canva", "dribbble")):
+                return "UI与创意设计 (开发创意)"
+            if any(k in low_e for k in ("code.exe", "idea64.exe", "pycharm", "cursor.exe", "visualstudio", "devenv.exe")):
+                return "IDE集成开发工具 (开发创意)"
+            if any(k in low_t for k in ("飞书", "feishu", "lark")):
+                return "飞书协同办公 (办公效率)"
+            if any(k in low_t for k in ("语雀", "yuque", "notion", "wolai", "obsidian", "flowus")):
+                return "团队与个人知识库 (办公效率)"
+            if any(k in low_t for k in ("google docs", "google sheets", "腾讯文档", "金山文档", "kdocs", "office", "excel", "word")):
+                return "在线协同文档 (办公效率)"
+            if any(k in low_e for k in ("wps.exe", "word.exe", "excel.exe", "powerpnt.exe")):
+                return "桌面办公套件 (办公效率)"
+            if any(k in low_t for k in ("微博", "weibo")):
+                return "微博热搜动态 (社交通讯)"
+            if any(k in low_t for k in ("知乎", "zhihu")):
+                return "知乎问答专栏 (社交通讯)"
+            if any(k in low_t for k in ("twitter", "x.com", "reddit")):
+                return "海外社交平台 (社交通讯)"
+            if any(k in low_e for k in ("wechat.exe", "qq.exe", "dingtalk.exe", "telegram", "discord")):
+                return "即时通讯聊天 (社交通讯)"
+
+            fallback_labels = {
+                "social": "社交通讯软件",
+                "creative": "开发与设计工具",
+                "entertainment": "影音娱乐通用",
+                "productivity": "办公效率工具",
+                "other": "日常工具与系统",
+            }
+            return fallback_labels.get(pri_cat, "通用软件分类")
+
+        output = io.StringIO()
+        # 写入 UTF-8 BOM 确保在 Windows Excel/WPS 打开不乱码
+        output.write("\ufeff")
+        writer = csv.writer(output)
+
+        # 1. 报表头部信息
+        writer.writerow(["# Dayflow 桌面屏幕使用时间明细报表"])
+        writer.writerow(["# 统计周期", period_label])
+        writer.writerow(["# 导出时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+        writer.writerow(["# 累计时长", _fmt_dur(total_sec), f"{total_sec} 秒"])
+        writer.writerow(["# 会话总数", f"{len(rows)} 条"])
+        writer.writerow([])
+
+        # 2. 一级分类分布汇总表
+        writer.writerow(["【一级分类时长汇总】"])
+        writer.writerow(["分类代码", "一级分类名称", "累计时长", "时长(秒)", "占比"])
+        for cr in cat_rows:
+            c_key = str(cr["category"])
+            c_sec = int(cr["sec"])
+            c_lbl = CATEGORY_LABELS.get(c_key, c_key)
+            ratio = (c_sec / total_sec * 100) if total_sec > 0 else 0
+            writer.writerow([c_key, c_lbl, _fmt_dur(c_sec), c_sec, f"{ratio:.1f}%"])
+        writer.writerow([])
+
+        # 3. 详细会话流水清单 (明确的 1 级、2 级分类列)
+        writer.writerow(["【时段使用会话流水明细表】"])
+        headers = [
+            "日期",
+            "开始时间",
+            "结束时间",
+            "小时时段",
+            "使用时长",
+            "时长(秒)",
+            "一级主分类",
+            "二级细分分类",
+            "软件名称",
+            "进程程序",
+            "窗口/网页标题",
+        ]
+        writer.writerow(headers)
+
+        for r in rows:
+            pri_key = str(r["session_category"] or "other")
+            pri_label = CATEGORY_LABELS.get(pri_key, "其他工具")
+            exe = str(r["exe_name"] or "")
+            title = str(r["last_window_title"] or "")
+            sec = int(r["duration_sec"])
+            sub_label = _resolve_sub_cat(exe, title, pri_key)
+
+            writer.writerow(
+                [
+                    str(r["date_str"]),
+                    str(r["start_time"]),
+                    str(r["end_time"]),
+                    f"{r['hour_bucket']:02d}:00",
+                    _fmt_dur(sec),
+                    sec,
+                    pri_label,
+                    sub_label,
+                    str(r["display_name"]),
+                    exe,
+                    title,
+                ]
+            )
+
+        return output.getvalue()

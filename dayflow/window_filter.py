@@ -241,3 +241,21 @@ def get_foreground_window_info(self_pid: int | None = None) -> ActiveWindowInfo 
     if not should_track_window(info, self_pid=effective_self_pid):
         return None
     return info
+
+
+def is_fullscreen_or_game_active() -> bool:
+    """使用 Windows Shell API (SHQueryUserNotificationState) 检查当前用户是否处于全屏独占游戏或全屏免打扰状态。"""
+    try:
+        import ctypes
+
+        state = ctypes.c_int()
+        res = ctypes.windll.shell32.SHQueryUserNotificationState(ctypes.byref(state))
+        if res == 0:
+            # 2: QUNS_BUSY (全屏独占游戏/全屏视频)
+            # 3: QUNS_RUNNING_D_NOT_PRESENT (Direct3D 全屏独占)
+            # 4: QUNS_PRESENTATION_MODE (全屏演示模式)
+            return state.value in (2, 3, 4)
+    except Exception:
+        pass
+    return False
+

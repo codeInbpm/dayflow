@@ -65,6 +65,48 @@ def create_tray_icon_image(size: int = 64) -> Image.Image:
     return img.resize((size, size), Image.Resampling.LANCZOS)
 
 
+def ask_quit_confirmation(parent_hwnd: int = 0, lang: str = "zh-CN") -> bool:
+    """在用户右键退出或关闭应用前，弹出 Windows 原生模态确认提示框。
+
+    返回 True 表示用户确认退出；返回 False 表示用户取消退出。
+    """
+    import os
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("DAYFLOW_NO_PROMPT"):
+        return True
+
+    try:
+        import ctypes
+
+        MB_YESNO = 0x00000004
+        MB_ICONQUESTION = 0x00000020
+        MB_TOPMOST = 0x00040000
+        MB_SETFOREGROUND = 0x00010000
+        MB_DEFBUTTON2 = 0x00000100  # 默认焦点在“否”上，防止误回车直接关闭
+        IDYES = 6
+
+        norm_lang = str(lang or "zh-CN").lower()
+        if "en" in norm_lang:
+            title = "Dayflow - Exit Confirmation"
+            message = "Are you sure you want to exit Dayflow?\n\nTracking your screen time will be paused."
+        elif "tw" in norm_lang or "hk" in norm_lang:
+            title = "Dayflow - 退出確認"
+            message = "確定要結束並退出 Dayflow 嗎？\n\n退出後將暫停記錄桌面應用使用時長。"
+        else:
+            title = "Dayflow - 退出确认"
+            message = "确定要退出 Dayflow 吗？\n\n退出后将暂停记录桌面应用使用时长。"
+
+        hwnd = int(parent_hwnd) if parent_hwnd else 0
+        res = ctypes.windll.user32.MessageBoxW(
+            hwnd,
+            message,
+            title,
+            MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2,
+        )
+        return res == IDYES
+    except Exception:
+        return True
+
+
 class TrayController:
     """Windows 系统托盘控制器，支持面板唤醒、置顶切换与退出应用。"""
 
@@ -74,11 +116,13 @@ class TrayController:
         on_toggle_top: Callable[[], object] | None = None,
         is_on_top: Callable[[], bool] | None = None,
         on_quit: Callable[[], object] | None = None,
+        confirm_quit: Callable[[], bool] | None = None,
     ) -> None:
         self._on_show = on_show
         self._on_toggle_top = on_toggle_top
         self._is_on_top = is_on_top or (lambda: False)
         self._on_quit = on_quit
+        self._confirm_quit = confirm_quit
         self._icon: object | None = None
         self._thread: threading.Thread | None = None
 
@@ -97,6 +141,15 @@ class TrayController:
                 pass
 
     def _handle_quit(self, icon: object = None, item: object = None) -> None:
+        if self._confirm_quit is not None:
+            try:
+                if not self._confirm_quit():
+                    return
+            except Exception:
+                pass
+        elif not ask_quit_confirmation():
+            return
+
         self.stop()
         if self._on_quit is not None:
             try:
@@ -159,3 +212,13 @@ class TrayController:
                 icon.stop()  # type: ignore[attr-defined]
             except Exception:
                 pass
+
+    def notify(self, title: str, message: str) -> bool:
+        """向 Windows 系统托盘/操作中心发送系统级原生通知。"""
+        if self._icon is not None:
+            try:
+                self._icon.notify(message, title)  # type: ignore[attr-defined]
+                return True
+            except Exception:
+                pass
+        return False

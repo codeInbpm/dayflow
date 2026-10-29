@@ -631,12 +631,12 @@ export async function hideToTray() {
 }
 
 /**
- * 保存当前计时数据并直接退出结束整个程序
+ * 保存当前计时数据并退出整个程序（支持 confirm=true 退出前给出提示确认）
  */
-export async function quitApp() {
+export async function quitApp(confirm = false) {
   const api = getPyApi()
   if (api && typeof api.quit_app === 'function') {
-    return await api.quit_app()
+    return await api.quit_app(confirm)
   }
   if (typeof window !== 'undefined' && typeof window.close === 'function') {
     window.close()
@@ -700,6 +700,42 @@ export async function startWindowResize(edge = 'se') {
     return await api.start_window_resize(edge)
   }
   return { ok: true, edge }
+}
+
+/**
+ * 导出使用时长详细报表为 CSV 文件并自动触发浏览器/WebView本地文件保存
+ * @param {string} dateStr
+ * @param {string} period 'day' | 'week' | 'month'
+ */
+export async function exportUsageReport(dateStr = '', period = 'day') {
+  const api = getPyApi()
+  let result = null
+  if (api && typeof api.export_usage_report === 'function') {
+    result = await api.export_usage_report(dateStr, period)
+  } else {
+    result = {
+      ok: true,
+      filename: `Dayflow_${period}_${dateStr || 'today'}.csv`,
+      csv_text: '\ufeff# Dayflow 使用时间明细报表\n日期,开始时间,结束时间,使用时长,一级主分类,二级细分分类,软件名称,进程程序\n',
+    }
+  }
+
+  if (result && result.csv_text && typeof document !== 'undefined') {
+    try {
+      const blob = new Blob([result.csv_text], { type: 'text/csv;charset=utf-8;' })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = result.filename || `Dayflow_${period}.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(link.href)
+      return { ok: true, filename: result.filename }
+    } catch (e) {
+      console.error('Failed to trigger download:', e)
+    }
+  }
+  return result
 }
 
 /**

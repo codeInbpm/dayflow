@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { Clock, Sparkles } from 'lucide-vue-next'
 import { CATEGORY_META, formatDuration } from '../api/bridge'
-import { effectiveTheme, getCategoryLabel, getLocalizedAppName } from '../i18n'
+import { effectiveTheme, getCategoryLabel, getLocalizedAppName, i18n } from '../i18n'
 
 const props = defineProps({
   records: {
@@ -22,6 +22,7 @@ const props = defineProps({
 const emit = defineEmits(['select-record'])
 
 const hoveredRecord = ref(null)
+const t = computed(() => i18n.value)
 const isLight = computed(() => effectiveTheme.value === 'light')
 
 // 将 "HH:MM:SS" 转为全天秒数 (0 ~ 86400)
@@ -103,10 +104,10 @@ function handleBlockClick(record) {
         :class="isLight ? 'text-zinc-700' : 'text-zinc-200'"
       >
         <Sparkles class="w-3.5 h-3.5 text-blue-500" />
-        <span>24 小时全景时光彩带 (甘特全貌)</span>
+        <span>{{ t.ganttTitle }}</span>
       </div>
       <div class="text-[10.5px] text-zinc-400 font-mono">
-        共 {{ records.length }} 个时间切片
+        {{ t.ganttSliceCount.replace('{count}', String(records.length)) }}
       </div>
     </div>
 

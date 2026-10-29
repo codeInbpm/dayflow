@@ -9,6 +9,9 @@ import {
   ShieldAlert,
   Calendar,
   HeartPulse,
+  Download,
+  AlertTriangle,
+  X,
 } from 'lucide-vue-next'
 import TitleBar from './components/TitleBar.vue'
 import ScreenTimeCard from './components/ScreenTimeCard.vue'
@@ -26,6 +29,8 @@ import {
   startWindowResize,
   formatDuration,
   dismissHealthRemind,
+  exportUsageReport,
+  quitApp,
 } from './api/bridge'
 import {
   i18n,
@@ -53,6 +58,27 @@ const detailModalRef = ref(null)
 const isSettingsOpen = ref(false)
 const showHealthNotification = ref(false)
 const selectedGanttRecordId = ref(null)
+const isQuitConfirmOpen = ref(false)
+
+async function handleDoQuitApp() {
+  await quitApp(false)
+}
+
+function handleGlobalKeyDown(e) {
+  if (e.key === 'Escape') {
+    if (isQuitConfirmOpen.value) {
+      isQuitConfirmOpen.value = false
+    } else if (isExportModalOpen.value) {
+      isExportModalOpen.value = false
+    }
+  }
+}
+
+const healthRemindMinutes = computed(() => {
+  const activeSec = dashboard.value?.health_guard?.continuous_active_sec || 0
+  const intervalSec = dashboard.value?.health_guard?.rest_interval_sec || 1800
+  return Math.max(1, Math.round((activeSec || intervalSec) / 60))
+})
 
 async function handleDismissHealthRemind() {
   showHealthNotification.value = false
@@ -183,6 +209,38 @@ function handleOpenAppDetail(appItem) {
   isDetailOpen.value = true
 }
 
+const isExportModalOpen = ref(false)
+const modalExportPeriod = ref('day')
+const isExporting = ref(false)
+const exportDoneTip = ref('')
+
+function handleOpenExportModal() {
+  modalExportPeriod.value = selectedPeriod.value || 'day'
+  exportDoneTip.value = ''
+  isExportModalOpen.value = true
+}
+
+async function handlePerformExport() {
+  if (isExporting.value) return
+  isExporting.value = true
+  exportDoneTip.value = ''
+  try {
+    const res = await exportUsageReport(selectedDate.value || '', modalExportPeriod.value)
+    if (res && res.success) {
+      exportDoneTip.value = `${t.value.exportSuccess} (${res.row_count || 0} 行)`
+      setTimeout(() => {
+        isExportModalOpen.value = false
+      }, 1500)
+    } else {
+      exportDoneTip.value = t.value.exportFailed
+    }
+  } catch (_err) {
+    exportDoneTip.value = t.value.exportFailed
+  } finally {
+    isExporting.value = false
+  }
+}
+
 async function handleAppUpdated() {
   await loadData(selectedDate.value, false, selectedPeriod.value)
 }
@@ -225,13 +283,23 @@ onMounted(async () => {
     loadData(selectedDate.value, true, selectedPeriod.value)
   }, 2000)
 
-  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-    mediaQueryList = window.matchMedia('(prefers-color-scheme: light)')
-    mediaQueryList.addEventListener?.('change', handleSystemThemeChange)
+  if (typeof window !== 'undefined') {
+    window.dayflowShowQuitConfirm = () => {
+      isQuitConfirmOpen.value = true
+    }
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    if (typeof window.matchMedia === 'function') {
+      mediaQueryList = window.matchMedia('(prefers-color-scheme: light)')
+      mediaQueryList.addEventListener?.('change', handleSystemThemeChange)
+    }
   }
 })
 
 onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    delete window.dayflowShowQuitConfirm
+    window.removeEventListener('keydown', handleGlobalKeyDown)
+  }
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
@@ -252,6 +320,7 @@ onUnmounted(() => {
       :active-app="dashboard.active_app"
       @open-settings="isSettingsOpen = true"
       @update:always-on-top="handleAlwaysOnTopSync"
+      @request-quit="isQuitConfirmOpen = true"
     />
 
     <!-- 主内容滚动视图 -->
@@ -279,7 +348,7 @@ onUnmounted(() => {
                 专注久坐健康提醒
               </div>
               <div class="text-[11px] text-zinc-500 dark:text-zinc-300 truncate">
-                您已连续专注工作超过 45 分钟，眺望远方或喝口水活动一下吧 🌱
+                您已连续专注工作超过 {{ healthRemindMinutes }} 分钟，眺望远方或喝口水活动一下吧 🌱
               </div>
             </div>
           </div>
@@ -303,6 +372,7 @@ onUnmounted(() => {
           v-model:selectedCategory="selectedCategory"
           @change-date="handleDateChange"
           @change-period="handlePeriodChange"
+          @open-export="handleOpenExportModal"
         />
 
         <AppUsageGrid
@@ -359,14 +429,27 @@ onUnmounted(() => {
               </span>
             </div>
 
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] text-[11px] font-medium text-zinc-300 transition-colors cursor-pointer"
-              @click="timelineSortDesc = !timelineSortDesc"
-            >
-              <ArrowUpDown class="w-3 h-3 text-blue-500" />
-              <span>{{ timelineSortDesc ? t.sortNewest : t.sortChrono }}</span>
-            </button>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                :title="t.exportReportBtn"
+                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/25 text-[11px] font-medium text-blue-400 transition-colors cursor-pointer"
+                @click="handleOpenExportModal"
+              >
+                <Download class="w-3 h-3 text-blue-400" />
+                <span class="hidden sm:inline">{{ t.exportReportBtn }}</span>
+                <span class="sm:hidden">CSV</span>
+              </button>
+
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] text-[11px] font-medium text-zinc-300 transition-colors cursor-pointer"
+                @click="timelineSortDesc = !timelineSortDesc"
+              >
+                <ArrowUpDown class="w-3 h-3 text-blue-500" />
+                <span>{{ timelineSortDesc ? t.sortNewest : t.sortChrono }}</span>
+              </button>
+            </div>
           </div>
 
           <!-- 分类过滤胶囊 -->
@@ -567,6 +650,203 @@ onUnmounted(() => {
       @update:always-on-top="handleAlwaysOnTopSync"
     />
 
+    <!-- 应用内优雅退出确认模态弹窗（放在应用内居中，彻底告别外部屏幕正中的原生框） -->
+    <Transition name="confirm-fade">
+      <div
+        v-if="isQuitConfirmOpen"
+        class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none"
+        @click.self="isQuitConfirmOpen = false"
+      >
+        <div
+          class="w-full max-w-[270px] rounded-2xl p-5 border shadow-2xl flex flex-col items-center text-center transition-all animate-in fade-in zoom-in-95 duration-150"
+          :class="
+            isLight
+              ? 'bg-white border-black/10 text-zinc-800'
+              : 'bg-[#222228] border-white/10 text-zinc-100'
+          "
+        >
+          <!-- 红色微光警告图标 -->
+          <div
+            class="w-10 h-10 rounded-full flex items-center justify-center mb-3 bg-rose-500/15 text-rose-500 border border-rose-500/25 shrink-0"
+          >
+            <AlertTriangle class="w-5 h-5 stroke-[2.2]" />
+          </div>
+
+          <!-- 标题 -->
+          <h3 class="text-[14px] font-semibold tracking-wide">
+            {{ t.confirmQuitTitle }}
+          </h3>
+
+          <!-- 描述说明 -->
+          <p class="text-[11.5px] text-zinc-400 mt-1.5 leading-relaxed">
+            {{ t.confirmQuitDesc }}
+          </p>
+
+          <!-- 按钮操作组 -->
+          <div class="grid grid-cols-2 gap-2 w-full mt-4.5">
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-xl text-[12px] font-medium transition-colors cursor-pointer"
+              :class="
+                isLight
+                  ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-700'
+                  : 'bg-white/[0.08] hover:bg-white/[0.14] text-zinc-300'
+              "
+              @click="isQuitConfirmOpen = false"
+            >
+              {{ t.btnCancel }}
+            </button>
+
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-xl text-[12px] font-semibold text-white bg-rose-500 hover:bg-rose-600 transition-colors shadow-sm cursor-pointer"
+              @click="handleDoQuitApp"
+            >
+              {{ t.btnConfirmQuit }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- 应用内数据报表导出模态弹窗 (让用户自行选择日/周/月) -->
+    <Transition name="confirm-fade">
+      <div
+        v-if="isExportModalOpen"
+        class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none"
+        @click.self="isExportModalOpen = false"
+      >
+        <div
+          class="w-full max-w-[300px] rounded-2xl p-5 border shadow-2xl flex flex-col text-left transition-all animate-in fade-in zoom-in-95 duration-150"
+          :class="
+            isLight
+              ? 'bg-white border-black/10 text-zinc-800'
+              : 'bg-[#222228] border-white/10 text-zinc-100'
+          "
+        >
+          <!-- 弹窗标题栏 -->
+          <div class="flex items-center justify-between mb-2.5">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-blue-500/15 text-blue-400 flex items-center justify-center shrink-0">
+                <Download class="w-4 h-4" />
+              </div>
+              <h3 class="text-[13px] font-semibold tracking-wide">
+                {{ t.exportModalTitle }}
+              </h3>
+            </div>
+            <button
+              type="button"
+              class="text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+              @click="isExportModalOpen = false"
+            >
+              <X class="w-4 h-4" />
+            </button>
+          </div>
+
+          <!-- 描述说明 -->
+          <p class="text-[11px] text-zinc-400 leading-relaxed mb-3">
+            {{ t.descDataExport }}
+          </p>
+
+          <!-- 周期选择大胶囊 (每日 / 每周 / 每月) -->
+          <div class="space-y-1 mb-3">
+            <label class="text-[11px] font-medium text-zinc-400">
+              {{ t.exportSelectPeriod }}
+            </label>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button
+                type="button"
+                class="py-1.5 rounded-lg text-[11.5px] font-medium transition-all cursor-pointer text-center border"
+                :class="
+                  modalExportPeriod === 'day'
+                    ? 'bg-blue-500 text-white border-blue-500 shadow-xs font-semibold'
+                    : isLight
+                      ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border-black/5'
+                      : 'bg-white/[0.05] hover:bg-white/[0.1] text-zinc-300 border-white/5'
+                "
+                @click="modalExportPeriod = 'day'"
+              >
+                {{ t.periodDay }}
+              </button>
+              <button
+                type="button"
+                class="py-1.5 rounded-lg text-[11.5px] font-medium transition-all cursor-pointer text-center border"
+                :class="
+                  modalExportPeriod === 'week'
+                    ? 'bg-blue-500 text-white border-blue-500 shadow-xs font-semibold'
+                    : isLight
+                      ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border-black/5'
+                      : 'bg-white/[0.05] hover:bg-white/[0.1] text-zinc-300 border-white/5'
+                "
+                @click="modalExportPeriod = 'week'"
+              >
+                {{ t.periodWeek }}
+              </button>
+              <button
+                type="button"
+                class="py-1.5 rounded-lg text-[11.5px] font-medium transition-all cursor-pointer text-center border"
+                :class="
+                  modalExportPeriod === 'month'
+                    ? 'bg-blue-500 text-white border-blue-500 shadow-xs font-semibold'
+                    : isLight
+                      ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border-black/5'
+                      : 'bg-white/[0.05] hover:bg-white/[0.1] text-zinc-300 border-white/5'
+                "
+                @click="modalExportPeriod = 'month'"
+              >
+                {{ t.periodMonth }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 当前对应基准日期 -->
+          <div
+            class="flex items-center justify-between text-[11px] py-1 px-2.5 rounded-lg mb-4"
+            :class="isLight ? 'bg-zinc-100 text-zinc-700' : 'bg-black/25 text-zinc-300 border border-white/5'"
+          >
+            <span class="text-zinc-400">{{ t.exportSelectedDate }}</span>
+            <span class="font-mono font-medium">
+              {{ selectedDate || dashboard?.date_str || '今日' }}
+            </span>
+          </div>
+
+          <!-- 导出成功或失败提示 -->
+          <div
+            v-if="exportDoneTip"
+            class="text-[11px] text-emerald-400 font-medium text-center pb-2 animate-pulse"
+          >
+            {{ exportDoneTip }}
+          </div>
+
+          <!-- 按钮操作组 -->
+          <div class="grid grid-cols-2 gap-2 w-full">
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-xl text-[12px] font-medium transition-colors cursor-pointer text-center"
+              :class="
+                isLight
+                  ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-700'
+                  : 'bg-white/[0.08] hover:bg-white/[0.14] text-zinc-300'
+              "
+              @click="isExportModalOpen = false"
+            >
+              {{ t.btnCancel }}
+            </button>
+
+            <button
+              type="button"
+              :disabled="isExporting"
+              class="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-semibold text-white bg-blue-500 hover:bg-blue-600 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+              @click="handlePerformExport"
+            >
+              <Download class="w-3.5 h-3.5" :class="isExporting ? 'animate-bounce' : ''" />
+              <span>{{ isExporting ? t.exportingReport : t.btnConfirmExport }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- 无边框窗口八向拖拽缩放热区（四边 + 四角 + 右下角斜纹缩放手柄） -->
     <!-- 上边 (n) -->
     <div
@@ -617,6 +897,15 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.confirm-fade-enter-active,
+.confirm-fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+.confirm-fade-enter-from,
+.confirm-fade-leave-to {
+  opacity: 0;
+}
+
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }

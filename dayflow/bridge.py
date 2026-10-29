@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from dayflow.app_meta import CATEGORY_META
 from dayflow.database import UsageDatabase
+from dayflow.hotkey import GlobalHotkeyManager
 from dayflow.tracker import ForegroundTracker
 
 try:
@@ -78,6 +79,10 @@ def _create_startup_shortcut(target_exe: Path, working_dir: Path, args: str = "-
         shortcut.Description = "Dayflow 桌面使用时长管家"
         shortcut.Save()
         if lnk_path.is_file():
+            try:
+                (_get_startup_folder() / "Dayflow.bat").unlink(missing_ok=True)
+            except Exception:
+                pass
             return True
     except Exception:
         pass
@@ -237,6 +242,62 @@ def _write_registry_autostart(enable: bool) -> bool:
 
     return success
 
+
+def check_and_heal_autostart_path() -> bool:
+    """检查自启动注册表与快捷方式中的执行路径是否与当前实际物理路径一致；若用户搬移了解压文件夹，静默自愈。"""
+    is_auto = _read_registry_autostart()
+    if not is_auto:
+        return False
+    healed = False
+    target_exe, working_dir, args = _get_autostart_target()
+    expected_cmd = _build_autostart_command()
+
+    # 1. 检查注册表 HKCU\...\Run
+    if HAS_WINREG and winreg is not None:
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                RUN_REG_PATH,
+                0,
+                winreg.KEY_READ,
+            ) as key:
+                val, _ = winreg.QueryValueEx(key, RUN_REG_NAME)
+                if val and str(val).strip() != expected_cmd.strip():
+                    _write_registry_autostart(True)
+                    healed = True
+        except Exception:
+            pass
+
+    # 2. 检查启动文件夹中的批处理或快捷方式目标路径
+    try:
+        bat = _get_startup_folder() / "Dayflow.bat"
+        if bat.is_file():
+            content = bat.read_text(encoding="utf-8", errors="ignore")
+            if str(target_exe) not in content:
+                _create_startup_shortcut(target_exe, working_dir, args)
+                healed = True
+    except Exception:
+        pass
+
+    try:
+        lnk = _get_startup_shortcut_path()
+        if lnk.is_file():
+            # 尝试通过 COM 读取目标路径
+            try:
+                import win32com.client
+                shell = win32com.client.Dispatch("WScript.Shell")
+                sc = shell.CreateShortcut(str(lnk))
+                if str(sc.TargetPath).lower() != str(target_exe).lower():
+                    _create_startup_shortcut(target_exe, working_dir, args)
+                    healed = True
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return healed
+
+
 try:
     import win32gui
     import win32process
@@ -329,6 +390,7 @@ class DayflowBridge:
         self._window_getter = window_getter
         self._on_quit = on_quit
         self._hwnd: int | None = None
+        self._tray: Any | None = None
         self.always_on_top: bool = False
         self._resizing: bool = False
         self._style_patched: bool = False
@@ -336,6 +398,80 @@ class DayflowBridge:
         self._dock_collapsed: bool = False
         self._edge_monitor_stop = threading.Event()
         self._edge_monitor_thread: threading.Thread | None = None
+
+        # 关联久坐提醒系统回调
+        self.tracker._on_health_remind = self.handle_health_remind
+        self.hotkey_mgr = GlobalHotkeyManager(on_trigger=self.toggle_window)
+
+        # 从数据库加载持久化设置到 tracker 与热键管理器（确保重启保持用户设置）
+        try:
+            persisted = self.db.get_preferences()
+            self.tracker.rest_remind_interval_sec = float(persisted.get("rest_remind_interval_sec", 1800))
+            self.tracker.health_remind_enabled = bool(persisted.get("health_remind_enabled", True))
+            self.tracker.health_remind_sound = bool(persisted.get("health_remind_sound", True))
+            self.tracker.health_remind_dnd_game = bool(persisted.get("health_remind_dnd_game", True))
+            self.tracker.idle_detection_enabled = bool(persisted.get("idle_detection_enabled", True))
+            self.tracker.idle_threshold_sec = float(persisted.get("idle_threshold_sec", 180))
+            hk_en = bool(persisted.get("global_hotkey_enabled", True))
+            hk_str = str(persisted.get("global_hotkey", "Ctrl+Shift+D"))
+            self.hotkey_mgr.start(hotkey_str=hk_str, enabled=hk_en)
+        except Exception:
+            pass
+
+        # 检查并自愈开机自启路径（防止解压后搬移目录导致自启失效）
+        try:
+            check_and_heal_autostart_path()
+        except Exception:
+            pass
+
+    def set_tray(self, tray: Any | None) -> None:
+        """设置系统托盘控制器引用，用于发送 Windows 系统通知。"""
+        self._tray = tray
+
+    def _is_window_foreground_visible(self) -> bool:
+        """检查 Dayflow 主窗口当前是否处于可见前台并获得焦点。"""
+        if not HAS_WIN32 or _user32 is None:
+            return False
+        hwnd = self._resolve_hwnd()
+        if not hwnd:
+            return False
+        try:
+            if not _user32.IsWindowVisible(hwnd):
+                return False
+            if _user32.IsIconic(hwnd):
+                return False
+            if self._dock_collapsed:
+                return False
+            fg_hwnd = _user32.GetForegroundWindow()
+            return fg_hwnd == hwnd
+        except Exception:
+            return False
+
+    def handle_health_remind(self, active_sec: float) -> None:
+        """当 tracker 检测到连续专注久坐超标时触发，智能分流：前台窗口显示横幅，后台/最小化发送系统通知。"""
+        # 若 Dayflow 处于可见前台，用户直接在界面内能看到横幅
+        if self._is_window_foreground_visible():
+            return
+
+        minutes = max(1, int(round(active_sec / 60)))
+        title = "🌱 Dayflow 专注久坐健康提醒"
+        msg = f"您已连续专注工作超过 {minutes} 分钟，眺望远方或喝口水小憩一下吧~"
+
+        # 发送系统通知
+        if self._tray is not None and hasattr(self._tray, "notify"):
+            try:
+                self._tray.notify(title, msg)
+            except Exception:
+                pass
+
+        # 播放提示音
+        if getattr(self.tracker, "health_remind_sound", True):
+            try:
+                import winsound
+
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            except Exception:
+                pass
 
     def set_window_getter(self, window_getter: Callable[[], Any] | None) -> None:
         """设置或更新 PyWebView 窗口获取函数。"""
@@ -520,6 +656,18 @@ class DayflowBridge:
             want_auto = bool(payload["auto_start"])
             _write_registry_autostart(want_auto)
 
+        if "health_remind_enabled" in payload:
+            self.tracker.health_remind_enabled = bool(payload["health_remind_enabled"])
+
+        if "health_remind_sound" in payload:
+            self.tracker.health_remind_sound = bool(payload["health_remind_sound"])
+
+        if "health_remind_dnd_game" in payload:
+            self.tracker.health_remind_dnd_game = bool(payload["health_remind_dnd_game"])
+
+        if "idle_detection_enabled" in payload:
+            self.tracker.idle_detection_enabled = bool(payload["idle_detection_enabled"])
+
         if "idle_threshold_sec" in payload:
             try:
                 self.tracker.idle_threshold_sec = max(30.0, float(payload["idle_threshold_sec"]))
@@ -532,16 +680,38 @@ class DayflowBridge:
             except (ValueError, TypeError):
                 pass
 
+        if "global_hotkey" in payload or "global_hotkey_enabled" in payload:
+            hk_str = str(payload.get("global_hotkey", self.hotkey_mgr._current_hotkey_str))
+            hk_en = bool(payload.get("global_hotkey_enabled", self.hotkey_mgr._enabled))
+            self.hotkey_mgr.update_hotkey(hk_str, enabled=hk_en)
+
         saved = self.db.update_preferences(payload)
         reg_state = _read_registry_autostart()
         if reg_state is not None:
             saved["auto_start"] = reg_state
-        saved.setdefault("idle_detection_enabled", True)
-        saved.setdefault("idle_threshold_sec", int(self.tracker.idle_threshold_sec))
-        saved.setdefault("health_remind_enabled", True)
-        saved.setdefault("rest_remind_interval_sec", int(self.tracker.rest_remind_interval_sec))
         saved["version"] = APP_VERSION
         return saved
+
+    def export_usage_report(
+        self, date_str: str | None = None, period: str = "day"
+    ) -> dict[str, Any]:
+        """导出规范详细的 CSV 使用时间明细报表（包含明确的 1 级、2 级分类）。"""
+        self.tracker.flush()
+        target_date = date_str or datetime.now().strftime("%Y-%m-%d")
+        csv_text = self.db.export_usage_csv_text(target_date, period=period)
+        filename = f"Dayflow_{period}_{target_date}.csv"
+        row_count = csv_text.count("\n")
+        return {
+            "ok": True,
+            "success": True,
+            "filename": filename,
+            "csv_text": csv_text,
+            "row_count": row_count,
+        }
+
+    def check_and_heal_autostart_path(self) -> bool:
+        """检查并自愈自启动注册表与快捷方式路径。"""
+        return check_and_heal_autostart_path()
 
     def get_app_detail(self, app_id: int, date_str: str | None = None) -> dict:
         """刷盘当前活跃计时并返回单个软件在指定日期的小时分布与会话明细。"""
@@ -906,8 +1076,19 @@ class DayflowBridge:
                 pass
         return self.show_window()
 
-    def quit_app(self) -> dict:
-        """立即隐藏窗口、保存当前正在进行的计时会话并直接退出结束整个程序（0延迟关闭）。"""
+    def quit_app(self, confirm: bool = False) -> dict:
+        """保存当前正在进行的计时会话并退出程序（支持 confirm=True 退出前提示确认）。"""
+        if confirm:
+            from dayflow.tray import ask_quit_confirmation
+
+            hwnd = self._resolve_hwnd() or 0
+            try:
+                lang = self.db.get_preferences().get("language", "zh-CN")
+            except Exception:
+                lang = "zh-CN"
+            if not ask_quit_confirmation(hwnd, lang=lang):
+                return {"ok": False, "cancelled": True}
+
         # 1. 第一时间异步隐藏主窗口，让用户点击关闭按钮的瞬间（<5ms）窗口立即从屏幕消失
         try:
             win = self._get_window()
