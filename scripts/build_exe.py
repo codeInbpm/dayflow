@@ -61,12 +61,40 @@ def main() -> int:
     ]
     PyInstaller.__main__.run(args)
     exe_file = root_dir / "release" / "Dayflow.exe"
-    if exe_file.is_file():
-        size_mb = exe_file.stat().st_size / (1024 * 1024)
-        print(f"\n[Dayflow Build] SUCCESS! Standalone executable created:")
-        print(f"  -> {exe_file} ({size_mb:.2f} MB)")
 
-        # 3. 自动生成便于微信/QQ直接分享的 ZIP 发行包（防止社交软件将 .exe 自动改名为 .exe1）
+    # 3. 调用 PyInstaller 打包轻量级卸载程序 uninst.exe（双击一键卸载程序并彻底清除本地数据）
+    uninst_args = [
+        "--noconfirm",
+        "--clean",
+        "--onefile",
+        "--windowed",
+        "--name=uninst",
+        f"--icon={icon_path}",
+        "--exclude-module=webview",
+        "--exclude-module=PIL",
+        "--exclude-module=psutil",
+        "--exclude-module=pystray",
+        "--exclude-module=sqlite3",
+        "--exclude-module=clr",
+        "--exclude-module=pythonnet",
+        "--exclude-module=pytest",
+        "--exclude-module=unittest",
+        f"--distpath={root_dir / 'release'}",
+        f"--workpath={root_dir / 'build' / 'pyinstaller_uninst'}",
+        f"--specpath={root_dir / 'build'}",
+        str(root_dir / "uninst.py"),
+    ]
+    PyInstaller.__main__.run(uninst_args)
+    uninst_file = root_dir / "release" / "uninst.exe"
+
+    if exe_file.is_file() and uninst_file.is_file():
+        size_mb = exe_file.stat().st_size / (1024 * 1024)
+        uninst_mb = uninst_file.stat().st_size / (1024 * 1024)
+        print(f"\n[Dayflow Build] SUCCESS! Standalone executables created:")
+        print(f"  -> {exe_file} ({size_mb:.2f} MB)")
+        print(f"  -> {uninst_file} ({uninst_mb:.2f} MB)")
+
+        # 4. 自动生成便于微信/QQ直接分享的 ZIP 发行包（包含 Dayflow.exe、uninst.exe、使用说明.txt）
         import zipfile
 
         readme_text = (
@@ -76,7 +104,8 @@ def main() -> int:
             "1. 将本压缩包解压到任意文件夹（建议放在 D 盘或常用软件目录）；\n"
             "2. 直接双击运行 Dayflow.exe 即可开始自动记录桌面软件使用时长；\n"
             "3. 所有统计数据均保存在同级自动生成的 data\\dayflow.db 本地数据库中，100% 本地隐私存储；\n"
-            "4. 点击右上角齿轮【设置】可切换深色/浅色模式、调节字体大小、切换语言或开启开机自启。\n"
+            "4. 点击右上角齿轮【设置】可切换深色/浅色模式、调节字体大小、切换语言或开启开机自启；\n"
+            "5. 【彻底卸载】如需卸载本软件，直接双击同级目录下的 uninst.exe，即可一键关闭程序、清除开机自启项、彻底删除 data 数据文件夹及主程序。\n"
         )
         readme_path = root_dir / "release" / "使用说明.txt"
         readme_path.write_text(readme_text, encoding="utf-8")
@@ -84,6 +113,7 @@ def main() -> int:
         zip_path = root_dir / "release" / "Dayflow-Windows-v1.0.0.zip"
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             zf.write(exe_file, arcname="Dayflow/Dayflow.exe")
+            zf.write(uninst_file, arcname="Dayflow/uninst.exe")
             zf.write(readme_path, arcname="Dayflow/使用说明.txt")
 
         zip_mb = zip_path.stat().st_size / (1024 * 1024)
