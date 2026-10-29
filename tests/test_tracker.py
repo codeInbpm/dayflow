@@ -74,3 +74,75 @@ def test_tracker_start_and_stop_lifecycle(tmp_path):
     tracker.start()
     tracker.stop()
     assert tracker.get_current_active() is None or isinstance(tracker.get_current_active(), dict)
+
+
+def test_tracker_idle_detection_and_browser_sub_category(tmp_path):
+    db = UsageDatabase(tmp_path / "tracker_idle.db")
+    mock_idle_sec = [0.0]
+    tracker = ForegroundTracker(
+        db,
+        poll_interval=1.0,
+        flush_interval=60.0,
+        idle_threshold_sec=180.0,
+        idle_detector=lambda: mock_idle_sec[0],
+        rest_remind_interval_sec=300.0,
+    )
+
+    chrome = ActiveWindowInfo(
+        10,
+        1001,
+        "C:/Chrome/chrome.exe",
+        "chrome.exe",
+        "哔哩哔哩 (゜-゜)つロ 干杯~-bilibili - Google Chrome",
+        "Chrome_WidgetWin_1",
+    )
+
+    # 1. 活跃状态 (idle = 0s)
+    tracker.tick(datetime(2026, 10, 29, 14, 0, 0), window_info=chrome)
+    tracker.tick(datetime(2026, 10, 29, 14, 0, 10), window_info=chrome)
+    assert tracker.is_idle is False
+    assert tracker.continuous_active_sec == 11.0
+
+    # 2. 用户离开电脑，无键盘鼠标操作 200 秒 (超过 180s 阈值)
+    mock_idle_sec[0] = 200.0
+    tracker.tick(datetime(2026, 10, 29, 14, 3, 30), window_info=chrome)
+    assert tracker.is_idle is True
+    # 离开期间的数据已被封口，不计入挂机无操作时间
+    active_snapshot = tracker.get_current_active()
+    assert active_snapshot["is_idle"] is True
+    assert active_snapshot["display_name"] == "离开电脑 (空闲)"
+
+    # 3. 用户重新操作 (idle = 1s)，解除空闲状态
+    mock_idle_sec[0] = 1.0
+    tracker.tick(datetime(2026, 10, 29, 14, 10, 0), window_info=chrome)
+    assert tracker.is_idle is False
+    tracker.flush(datetime(2026, 10, 29, 14, 10, 5))
+
+    # 4. 验证数据库中，B站网页被精准分类为 entertainment (影音娱乐) 而不是单纯 productivity
+    summary = db.get_daily_summary("2026-10-29")
+    cat_map = {c["category"]: c["total_sec"] for c in summary["category_totals"]}
+    assert cat_map.get("entertainment", 0) > 0
+
+
+def test_tracker_health_focus_guard_reminder(tmp_path):
+    db = UsageDatabase(tmp_path / "tracker_health.db")
+    tracker = ForegroundTracker(
+        db,
+        poll_interval=1.0,
+        idle_threshold_sec=300.0,
+        idle_detector=lambda: 0.0,
+        rest_remind_interval_sec=10.0,  # 设为 10 秒测试疲劳提醒
+    )
+
+    code = ActiveWindowInfo(
+        20, 2001, "C:/VSCode/Code.exe", "Code.exe", "main.py", "Chrome_WidgetWin_1"
+    )
+
+    tracker.tick(datetime(2026, 10, 29, 9, 0, 0), window_info=code)
+    assert tracker.check_and_consume_health_remind() is False
+
+    # 连续专注使用 12 秒，触发健康提醒
+    tracker.tick(datetime(2026, 10, 29, 9, 0, 12), window_info=code)
+    assert tracker.check_and_consume_health_remind() is True
+    # 再次读取时已经被 consume，返回 False 避免频繁打扰
+    assert tracker.check_and_consume_health_remind() is False

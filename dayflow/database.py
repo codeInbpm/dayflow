@@ -89,6 +89,10 @@ class UsageDatabase:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sessions_app_date ON usage_sessions(app_id, date_str);"
             )
+            try:
+                self._conn.execute("ALTER TABLE usage_sessions ADD COLUMN category TEXT;")
+            except Exception:
+                pass
             self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -142,6 +146,7 @@ class UsageDatabase:
         end_dt: datetime,
         window_title: str = "",
         merge_gap_sec: int = 5,
+        category: str | None = None,
     ) -> list[int]:
         """Split [start_dt, end_dt] across hour boundaries and merge adjacent sessions in same hour."""
         if end_dt <= start_dt:
@@ -167,7 +172,7 @@ class UsageDatabase:
 
                     last_row = self._conn.execute(
                         """
-                        SELECT id, start_time, end_time, duration_sec, last_window_title
+                        SELECT id, start_time, end_time, duration_sec, last_window_title, category
                         FROM usage_sessions
                         WHERE app_id = ? AND date_str = ? AND hour_bucket = ?
                         ORDER BY id DESC
@@ -183,17 +188,21 @@ class UsageDatabase:
                                 date_str, hour_bucket, str(last_row["end_time"])
                             )
                             gap = (cur_start - last_end_dt).total_seconds()
-                            if -1.0 <= gap <= merge_gap_sec:
+                            # 仅在时间连续且细分分类一致时合并
+                            old_cat = last_row["category"]
+                            cat_compatible = (not category) or (not old_cat) or (old_cat == category)
+                            if -1.0 <= gap <= merge_gap_sec and cat_compatible:
                                 sid = int(last_row["id"])
                                 new_duration = min(3600, int(last_row["duration_sec"]) + seg_sec)
                                 new_title = window_title if window_title else str(last_row["last_window_title"])
+                                final_cat = category or old_cat
                                 self._conn.execute(
                                     """
                                     UPDATE usage_sessions
-                                    SET end_time = ?, duration_sec = ?, last_window_title = ?
+                                    SET end_time = ?, duration_sec = ?, last_window_title = ?, category = ?
                                     WHERE id = ?
                                     """,
-                                    (end_time_str, new_duration, new_title, sid),
+                                    (end_time_str, new_duration, new_title, final_cat, sid),
                                 )
                                 session_ids.append(sid)
                                 merged = True
@@ -205,9 +214,9 @@ class UsageDatabase:
                         cur = self._conn.execute(
                             """
                             INSERT INTO usage_sessions (
-                                app_id, date_str, hour_bucket, start_time, end_time, duration_sec, last_window_title
+                                app_id, date_str, hour_bucket, start_time, end_time, duration_sec, last_window_title, category
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
                                 app_id,
@@ -217,6 +226,7 @@ class UsageDatabase:
                                 end_time_str,
                                 capped_sec,
                                 window_title or "",
+                                category,
                             ),
                         )
                         session_ids.append(int(cur.lastrowid))
@@ -252,11 +262,11 @@ class UsageDatabase:
 
             bucket_rows = self._conn.execute(
                 """
-                SELECT s.hour_bucket, a.category, SUM(s.duration_sec) AS sec
+                SELECT s.hour_bucket, COALESCE(s.category, a.category) AS category, SUM(s.duration_sec) AS sec
                 FROM usage_sessions s
                 JOIN apps a ON a.id = s.app_id
                 WHERE s.date_str = ? AND a.is_ignored = 0
-                GROUP BY s.hour_bucket, a.category
+                GROUP BY s.hour_bucket, COALESCE(s.category, a.category)
                 """,
                 (date_str,),
             ).fetchall()
@@ -575,11 +585,11 @@ class UsageDatabase:
         cat_totals_map: dict[str, int] = {cat: 0 for cat in CATEGORIES}
         cat_rows = self._conn.execute(
             """
-            SELECT a.category, COALESCE(SUM(s.duration_sec), 0) AS sec
+            SELECT COALESCE(s.category, a.category) AS category, COALESCE(SUM(s.duration_sec), 0) AS sec
             FROM usage_sessions s
             JOIN apps a ON a.id = s.app_id
             WHERE s.date_str BETWEEN ? AND ? AND a.is_ignored = 0
-            GROUP BY a.category
+            GROUP BY COALESCE(s.category, a.category)
             """,
             (start_str, end_str),
         ).fetchall()
@@ -743,11 +753,11 @@ class UsageDatabase:
 
                 day_cat_rows = self._conn.execute(
                     """
-                    SELECT s.date_str, a.category, COALESCE(SUM(s.duration_sec), 0) AS sec
+                    SELECT s.date_str, COALESCE(s.category, a.category) AS category, COALESCE(SUM(s.duration_sec), 0) AS sec
                     FROM usage_sessions s
                     JOIN apps a ON a.id = s.app_id
                     WHERE s.date_str BETWEEN ? AND ? AND a.is_ignored = 0
-                    GROUP BY s.date_str, a.category
+                    GROUP BY s.date_str, COALESCE(s.category, a.category)
                     """,
                     (start_str, end_str),
                 ).fetchall()
@@ -839,11 +849,11 @@ class UsageDatabase:
 
             day_cat_rows = self._conn.execute(
                 """
-                SELECT s.date_str, a.category, COALESCE(SUM(s.duration_sec), 0) AS sec
+                SELECT s.date_str, COALESCE(s.category, a.category) AS category, COALESCE(SUM(s.duration_sec), 0) AS sec
                 FROM usage_sessions s
                 JOIN apps a ON a.id = s.app_id
                 WHERE s.date_str BETWEEN ? AND ? AND a.is_ignored = 0
-                GROUP BY s.date_str, a.category
+                GROUP BY s.date_str, COALESCE(s.category, a.category)
                 """,
                 (start_str, end_str),
             ).fetchall()

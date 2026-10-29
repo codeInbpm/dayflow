@@ -233,7 +233,9 @@ def test_bridge_preferences_and_version(tmp_path):
     assert prefs["language"] == "system"
     assert prefs["theme"] == "dark"
     assert prefs["font_scale"] == 1.0
-    assert prefs["version"] == "1.0.0"
+    assert prefs["version"] == "1.0.1"
+    assert prefs["idle_detection_enabled"] is True
+    assert prefs["health_remind_enabled"] is True
 
     updated = bridge.update_preferences(
         {
@@ -245,7 +247,7 @@ def test_bridge_preferences_and_version(tmp_path):
     assert updated["language"] == "en"
     assert updated["theme"] == "light"
     assert updated["font_scale"] == 1.15
-    assert updated["version"] == "1.0.0"
+    assert updated["version"] == "1.0.1"
 
     # 验证 start_window_resize 对非法方向与无句柄窗口的安全返回
     res_invalid = bridge.start_window_resize("invalid")

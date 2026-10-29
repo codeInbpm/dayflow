@@ -8,12 +8,14 @@ import {
   Terminal,
   ShieldAlert,
   Calendar,
+  HeartPulse,
 } from 'lucide-vue-next'
 import TitleBar from './components/TitleBar.vue'
 import ScreenTimeCard from './components/ScreenTimeCard.vue'
 import AppUsageGrid from './components/AppUsageGrid.vue'
 import AppDetailModal from './components/AppDetailModal.vue'
 import SettingsModal from './components/SettingsModal.vue'
+import GanttTimeline from './components/GanttTimeline.vue'
 import {
   CATEGORY_META,
   CATEGORY_ORDER,
@@ -23,6 +25,7 @@ import {
   updateAppSettings,
   startWindowResize,
   formatDuration,
+  dismissHealthRemind,
 } from './api/bridge'
 import {
   i18n,
@@ -48,6 +51,18 @@ const isDetailOpen = ref(false)
 const activeModalApp = ref(null)
 const detailModalRef = ref(null)
 const isSettingsOpen = ref(false)
+const showHealthNotification = ref(false)
+const selectedGanttRecordId = ref(null)
+
+async function handleDismissHealthRemind() {
+  showHealthNotification.value = false
+  await dismissHealthRemind()
+}
+
+function handleSelectGanttRecord(record) {
+  selectedGanttRecordId.value = record?.id
+  handleOpenAppDetail(record)
+}
 
 let pollTimer = null
 let mediaQueryList = null
@@ -133,6 +148,9 @@ async function loadData(
       }
       if (!silent && data.preferences) {
         applyPreferencesToDom(data.preferences)
+      }
+      if (data?.health_guard?.should_remind) {
+        showHealthNotification.value = true
       }
     }
     ignoredApps.value = await fetchIgnoredApps()
@@ -237,7 +255,44 @@ onUnmounted(() => {
     />
 
     <!-- 主内容滚动视图 -->
-    <main class="flex-1 overflow-y-auto px-3.5 py-3 space-y-3">
+    <main class="flex-1 overflow-y-auto px-3.5 py-3 space-y-3 relative">
+      <!-- 连续用眼/久坐疲劳微光关怀浮动提醒 (Health & Focus Guard) -->
+      <transition
+        enter-active-class="transition duration-300 ease-out"
+        enter-from-class="-translate-y-4 opacity-0 scale-95"
+        enter-to-class="translate-y-0 opacity-100 scale-100"
+        leave-active-class="transition duration-200 ease-in"
+        leave-from-class="translate-y-0 opacity-100 scale-100"
+        leave-to-class="-translate-y-4 opacity-0 scale-95"
+      >
+        <div
+          v-if="showHealthNotification"
+          class="fixed top-12 left-3 right-3 z-50 p-3 rounded-2xl backdrop-blur-xl border shadow-2xl flex items-center justify-between gap-3"
+          :class="isLight ? 'bg-white/95 border-emerald-500/30 text-zinc-900 shadow-emerald-500/15' : 'bg-[#18221c]/95 border-emerald-500/40 text-emerald-100 shadow-black/80'"
+        >
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-500 flex items-center justify-center shrink-0">
+              <HeartPulse class="w-4 h-4 animate-pulse" />
+            </div>
+            <div class="min-w-0">
+              <div class="text-[12px] font-bold text-emerald-600 dark:text-emerald-400">
+                专注久坐健康提醒
+              </div>
+              <div class="text-[11px] text-zinc-500 dark:text-zinc-300 truncate">
+                您已连续专注工作超过 45 分钟，眺望远方或喝口水活动一下吧 🌱
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="px-2.5 py-1 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-semibold shrink-0 cursor-pointer shadow-xs transition-colors"
+            @click="handleDismissHealthRemind"
+          >
+            我知道了
+          </button>
+        </div>
+      </transition>
+
       <!-- Tab 1: 今日看板 (支持每日/每周/每月汇总切换 + 分色柱状图 + 双列软件图标网格) -->
       <template v-if="activeTab === 'dashboard' || activeTab === 'overview'">
         <ScreenTimeCard
@@ -338,6 +393,15 @@ onUnmounted(() => {
               <span>{{ pill.label }}</span>
             </button>
           </div>
+
+          <!-- 24 小时全景时光彩带 (甘特全貌流) -->
+          <GanttTimeline
+            :records="dashboard.timeline || []"
+            :selected-record-id="selectedGanttRecordId"
+            :is-today="selectedPeriod === 'day' && (!selectedDate || selectedDate === dashboard?.today_str)"
+            @select-record="handleSelectGanttRecord"
+            class="mb-2"
+          />
 
           <!-- 时间轴流水卡片列表 -->
           <div v-if="filteredTimeline.length > 0" class="space-y-2">

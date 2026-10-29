@@ -100,19 +100,19 @@ def main() -> int:
         import zipfile
 
         readme_text = (
-            "Dayflow 桌面时长管家 (v1.0.0 - Windows 绿色免安装版)\n"
+            "Dayflow 桌面时长管家 (v1.0.1 - Windows 绿色免安装版)\n"
             "==================================================\n\n"
             "【使用方法】\n"
             "1. 将本压缩包解压到任意文件夹（建议放在 D 盘或常用软件目录）；\n"
             "2. 直接双击运行 Dayflow.exe 即可开始自动记录桌面软件使用时长；\n"
             "3. 所有统计数据均保存在同级自动生成的 data\\dayflow.db 本地数据库中，100% 本地隐私存储；\n"
-            "4. 点击右上角齿轮【设置】可切换深色/浅色模式、调节字体大小、切换语言或开启开机自启；\n"
+            "4. 点击右上角齿轮【设置】可切换深色/浅色模式、调节字体大小、切换语言、开启开机自启或配置挂机与久坐健康提醒；\n"
             "5. 【彻底卸载】如需卸载本软件，直接双击同级目录下的 uninst.exe，即可一键关闭程序、清除开机自启项、彻底删除 data 数据文件夹及主程序。\n"
         )
         readme_path = root_dir / "release" / "使用说明.txt"
         readme_path.write_text(readme_text, encoding="utf-8")
 
-        zip_path = root_dir / "release" / "Dayflow-Windows-v1.0.0.zip"
+        zip_path = root_dir / "release" / "Dayflow-Windows-v1.0.1.zip"
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             zf.write(exe_file, arcname="Dayflow/Dayflow.exe")
             zf.write(uninst_file, arcname="Dayflow/uninst.exe")

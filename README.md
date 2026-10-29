@@ -33,6 +33,22 @@
 
 ## 🚀 核心功能特性 (Key Features)
 
+### 🌟 v1.0.1 重磅升级新特性 (What's New in v1.0.1)
+- **💤 用户空闲/挂机离线智能检测（Idle Detection）**：底层 Win32 `GetLastInputInfo` 毫秒级感知，当键盘/鼠标超过 3 分钟无操作自动判定为离线挂机，立即自动封口当前软件会话并暂停计时；当您重新敲击键盘或移动鼠标时秒级自动恢复活跃，彻底告别锁屏或离开电脑时的“虚高”统计。
+- **🌐 浏览器内标签页二级智能分类（网页细粒度分流）**：打破“整个浏览器都算同一分类”的传统痛点，智能捕获 Chrome、Edge、Firefox 等主流浏览器的窗口标签标题，精准分流：
+  - **影音娱乐**：B站 (bilibili)、YouTube、爱奇艺、腾讯视频、网易云音乐、Twitch 等；
+  - **开发与创意**：GitHub、GitLab、StackOverflow、ChatGPT、Claude、V2EX、LeetCode、Figma 等；
+  - **办公与效率**：飞书、语雀、Notion、Google Docs、腾讯文档、Office 365 等；
+  - **社交通讯**：微博、知乎、微信网页版、Twitter/X、Reddit、贴吧等。
+- **🌱 连续用眼/久坐疲劳微光提醒（Health & Focus Guard）**：连续专注操作电脑达到 45 分钟时，顶部无缝滑出优雅柔和的毛玻璃护眼微光横幅，温馨提示眨眼远眺与活动颈椎；离开休息 2 分钟或点击“我知道了”即自动重置健康时钟。
+- **📊 24 小时全景时光甘特流（Visual Gantt Timeline）**：在“时段流水”页面顶部新增全景时间甘特彩带，横贯全天 00:00~24:00。每一次会话切分按分类色块自然沉淀，带有当前时刻红色呼吸指示针与鼠标 Hover/Click 双向高亮联动，全天时间流向一览无遗。
+- **🎨 柱状图视觉架构全面重构**：
+  - 彻底移出生硬纵向网格虚线，仅保留顶部 1 小时与中部 30 分钟两道极淡参考线；
+  - 引入全天 24 小时背景胶囊底轨（Ghost Track Pillars），无使用时段点缀微光小点，告别白天大段空洞；
+  - 设定 15% 顶部安全呼吸留白，最高时长绝不顶格挤压；
+  - “其他工具”升级为冷板岩灰（#94A3B8），色块堆叠圆角平滑贴合；
+  - 坐标轴等宽居中微调与右上角实时脉冲绿灯徽章。
+
 ### 1. 📈 多维度可视化看板（每日 / 每周 / 每月）
 - **三维度自由切换**：支持按 **每日（24 小时）**、**每周（周一至周日）**、**每月（自然月每日趋势）** 汇总统计屏幕使用总时长与日均时长。
 - **历史日期前后回溯**：支持前后翻页查看任意历史日期、历史周、历史月的使用报告，并与上一周期（昨日 / 上周 / 上月）自动进行环比对比。
@@ -75,7 +91,7 @@
 ## 📦 快速开始 (Quick Start)
 
 ### 方式一：直接运行免安装版（推荐普通用户）
-1. 解压发行包 `Dayflow-Windows-v1.0.0.zip` 到任意目录；
+1. 解压发行包 `Dayflow-Windows-v1.0.1.zip` 到任意目录；
 2. 双击运行 **`Dayflow.exe`** 即可开始自动记录桌面软件使用时长；
 3. 如需彻底卸载并清空本地统计数据，双击同目录下的 **`uninst.exe`** 即可。
 
@@ -142,7 +158,7 @@ npm --prefix frontend run build
 - `release/Dayflow.exe`：独立单文件主程序
 - `release/uninst.exe`：一键卸载与数据清除工具
 - `release/使用说明.txt`：用户快速上手说明
-- `release/Dayflow-Windows-v1.0.0.zip`：可直接通过微信/QQ分享给朋友的完整压缩包
+- `release/Dayflow-Windows-v1.0.1.zip`：可直接通过微信/QQ分享给朋友的完整压缩包
 
 ---
 
@@ -152,12 +168,12 @@ npm --prefix frontend run build
 .\.venv\Scripts\python.exe -m pytest -v
 ```
 
-测试套件完整覆盖：
+测试套件完整覆盖（31 项测试全部绿灯）：
 - `tests/test_window_filter.py`：前台窗口过滤、桌面/文件资源管理器区分、UWP 宿主穿透、自身进程与系统黑名单过滤
-- `tests/test_app_meta.py`：内置字典分类、Win32 PE 文件描述与高清 PNG 图标提取
-- `tests/test_database.py`：跨小时与跨午夜时间段自动切分、相邻会话合并、日/周/月聚合统计与分类重算
-- `tests/test_tracker.py`：轮询合并、睡眠/锁屏大跨度断点检测、缓存落盘与生命周期管理
-- `tests/test_bridge.py`：JS-Python Bridge 接口、偏好设置持久化、任务栏点击最小化切换与 QQ 风格顶部贴边自动隐藏状态机
+- `tests/test_app_meta.py`：内置字典分类、浏览器二级分类精准分流、Win32 PE 文件描述与高清 PNG 图标提取
+- `tests/test_database.py`：跨小时与跨午夜时间段自动切分、相邻会话合并、分类重算与历史兼容
+- `tests/test_tracker.py`：Win32 挂机空闲检测、连续用眼疲劳提醒、轮询合并、睡眠/断点检测与生命周期管理
+- `tests/test_bridge.py`：JS-Python Bridge 接口、偏好设置持久化、自启动检测、任务栏与 QQ 风格顶部贴边自动隐藏状态机
 - `tests/test_uninst.py`：卸载清理与本地数据擦除验证
 
 ---
@@ -182,6 +198,7 @@ dayflow/
 │   │   │   ├── TitleBar.vue        # 无边框顶栏、置顶/最小化/退出控制与导航栏
 │   │   │   ├── ScreenTimeCard.vue  # 日/周/月汇总卡片、日期切换与环比对比
 │   │   │   ├── HourlyBarChart.vue  # 交互式分色堆叠柱状图与浮动气泡
+│   │   │   ├── GanttTimeline.vue   # 24 小时全景时光甘特流组件
 │   │   │   ├── AppUsageGrid.vue    # 双列磁贴网格与单列进度条排行榜视图
 │   │   │   ├── AppDetailModal.vue  # 软件 24 小时分布、分类设置与会话流水弹窗
 │   │   │   └── SettingsModal.vue   # 设置面板 (语言/深浅色外观/字号滑块/开机自启/版本)

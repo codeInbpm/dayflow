@@ -27,6 +27,93 @@ CATEGORY_META: dict[str, dict] = {
     "other": {"key": "other", "label": "其他工具", "color": "#94A3B8"},
 }
 
+# 常见主流浏览器进程名集合（小写）
+BROWSER_EXE_NAMES: set[str] = {
+    "chrome.exe",
+    "msedge.exe",
+    "firefox.exe",
+    "brave.exe",
+    "360chrome.exe",
+    "360se.exe",
+    "qqbrowser.exe",
+    "sogouexplorer.exe",
+    "liebao.exe",
+    "opera.exe",
+    "vivaldi.exe",
+    "safari.exe",
+    "centbrowser.exe",
+    "yandex.exe",
+}
+
+# 浏览器网页二级智能分类关键词规则
+_BROWSER_CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
+    # 影音娱乐 (entertainment)
+    (
+        "entertainment",
+        (
+            "bilibili", "哔哩哔哩", "youtube", "优酷", "youku", "爱奇艺", "iqiyi",
+            "腾讯视频", "v.qq.com", "netflix", "twitch", "抖音", "douyin",
+            "小红书", "xiaohongshu", "快手", "kuaishou", "acfun", "spotify",
+            "网易云音乐", "music.163.com", "qq音乐", "y.qq.com", "斗鱼", "douyu",
+            "虎牙", "huya", "steam", "steamcommunity", "mgtv", "芒果tv",
+            "biliplay", "cctv", "影视", "动漫", "番剧", "直播",
+        ),
+    ),
+    # 社交通讯 (social)
+    (
+        "social",
+        (
+            "微博", "weibo", "贴吧", "tieba", "知乎", "zhihu", "twitter", "x.com",
+            "x - ", "discord", "telegram", "即刻", "jike", "reddit", "v2ex",
+            "whatsapp", "facebook", "instagram", "threads", "微信", "wechat",
+            "豆瓣", "douban", "hupu", "虎扑", "nga", "coolapk", "酷安",
+        ),
+    ),
+    # 开发与创意 (creative)
+    (
+        "creative",
+        (
+            "github", "gitlab", "gitee", "stack overflow", "stackoverflow", "掘金", "juejin",
+            "csdn", "博客园", "cnblogs", "segmentfault", "思否", "leetcode", "力扣",
+            "chatgpt", "openai", "claude", "anthropic", "hugging face", "huggingface",
+            "cursor", "figma", "codepen", "codesandbox", "npm", "pypi", "kaggle",
+            "v0.dev", "gemini", "deepseek", "开发者", "developer", "devtools",
+            "developer tools", "runoob", "菜鸟教程", "w3schools", "mdn", "vuejs",
+            "react", "angular", "python.org", "docker hub", "aws", "azure", "aliyun",
+        ),
+    ),
+    # 办公与效率 (productivity)
+    (
+        "productivity",
+        (
+            "飞书", "feishu", "lark", "语雀", "yuque", "腾讯文档", "docs.qq.com",
+            "notion", "google docs", "google sheets", "google drive", "gmail",
+            "outlook", "office.com", "microsoft 365", "百度网盘", "pan.baidu",
+            "夸克网盘", "quark", "115网盘", "onedrive", "腾讯企业邮", "网易企业邮",
+            "confluence", "jira", "trello", "wolai", "flomo", "draw.io",
+            "processon", "金山文档", "kdocs", "石墨文档", "shimo",
+        ),
+    ),
+]
+
+
+def resolve_browser_tab_category(exe_name: str | None, window_title: str | None) -> str | None:
+    """根据浏览器进程名与窗口标题中的网页名称，二级细分该网页的实际分类。"""
+    if not exe_name:
+        return None
+    norm_exe = exe_name.strip().lower()
+    if norm_exe not in BROWSER_EXE_NAMES:
+        return None
+    if not window_title:
+        return None
+
+    title_lower = window_title.strip().lower()
+    for cat, keywords in _BROWSER_CATEGORY_RULES:
+        for kw in keywords:
+            if kw in title_lower:
+                return cat
+    return None
+
 # 内置 70+ 款国内常用 Windows 软件词典：小写 exe 名 -> (友好显示名称, 分类)
 BUILTIN_APP_CATALOG: dict[str, tuple[str, str]] = {
     # 社交通讯 (social)

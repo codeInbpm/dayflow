@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover
     winreg = None  # type: ignore[assignment]
     HAS_WINREG = False
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 RUN_REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
 STARTUP_APPROVED_PATH = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 RUN_REG_NAME = "Dayflow"
@@ -421,7 +421,7 @@ class DayflowBridge:
                     a.exe_path,
                     a.exe_name,
                     a.display_name,
-                    a.category,
+                    COALESCE(s.category, a.category) AS category,
                     a.icon_base64
                 FROM usage_sessions s
                 JOIN apps a ON a.id = s.app_id
@@ -476,6 +476,7 @@ class DayflowBridge:
             summary.get("end_date_str", target_date),
         )
         active_app = self.tracker.get_current_active()
+        health_remind = self.tracker.check_and_consume_health_remind()
 
         return {
             **summary,
@@ -485,28 +486,60 @@ class DayflowBridge:
             "always_on_top": self.always_on_top,
             "timeline": timeline,
             "preferences": self.get_preferences(),
+            "health_guard": {
+                "continuous_active_sec": int(self.tracker.continuous_active_sec),
+                "should_remind": bool(health_remind),
+                "rest_interval_sec": int(self.tracker.rest_remind_interval_sec),
+            },
+            "is_idle": bool(self.tracker.is_idle),
         }
 
+    def dismiss_health_remind(self) -> dict:
+        """用户确认知晓疲劳提醒，重置连续专注计时。"""
+        self.tracker.continuous_active_sec = 0.0
+        self.tracker._health_remind_pending = False
+        return {"ok": True}
+
     def get_preferences(self) -> dict[str, Any]:
-        """获取通用设置（语言、外观、字体大小、开机自启）与版本信息。"""
+        """获取通用设置（语言、外观、字体大小、开机自启、挂机空闲检测、健康提醒）与版本信息。"""
         prefs = self.db.get_preferences()
         reg_state = _read_registry_autostart()
         if reg_state is not None:
             prefs["auto_start"] = reg_state
+        prefs.setdefault("idle_detection_enabled", True)
+        prefs.setdefault("idle_threshold_sec", int(self.tracker.idle_threshold_sec))
+        prefs.setdefault("health_remind_enabled", True)
+        prefs.setdefault("rest_remind_interval_sec", int(self.tracker.rest_remind_interval_sec))
         prefs["version"] = APP_VERSION
         return prefs
 
     def update_preferences(self, updates: dict[str, Any] | None = None) -> dict[str, Any]:
-        """更新通用设置，若包含 auto_start 则同步写入/移除 Windows 注册表开机启动项。"""
+        """更新通用设置，同步更新 Windows 注册表与挂机检测/疲劳提醒运行时状态。"""
         payload = dict(updates or {})
         if "auto_start" in payload:
             want_auto = bool(payload["auto_start"])
             _write_registry_autostart(want_auto)
 
+        if "idle_threshold_sec" in payload:
+            try:
+                self.tracker.idle_threshold_sec = max(30.0, float(payload["idle_threshold_sec"]))
+            except (ValueError, TypeError):
+                pass
+
+        if "rest_remind_interval_sec" in payload:
+            try:
+                self.tracker.rest_remind_interval_sec = max(300.0, float(payload["rest_remind_interval_sec"]))
+            except (ValueError, TypeError):
+                pass
+
         saved = self.db.update_preferences(payload)
         reg_state = _read_registry_autostart()
         if reg_state is not None:
             saved["auto_start"] = reg_state
+        saved.setdefault("idle_detection_enabled", True)
+        saved.setdefault("idle_threshold_sec", int(self.tracker.idle_threshold_sec))
+        saved.setdefault("health_remind_enabled", True)
+        saved.setdefault("rest_remind_interval_sec", int(self.tracker.rest_remind_interval_sec))
         saved["version"] = APP_VERSION
         return saved
 

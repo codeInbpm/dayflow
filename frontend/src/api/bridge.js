@@ -649,7 +649,21 @@ const mockPreferences = {
   theme: 'dark',
   font_scale: 1.0,
   auto_start: false,
-  version: '1.0.0',
+  idle_threshold_sec: 180,
+  health_remind_enabled: true,
+  rest_remind_interval_sec: 2700,
+  version: '1.0.1',
+}
+
+/**
+ * 用户知晓健康疲劳提醒
+ */
+export async function dismissHealthRemind() {
+  const api = getPyApi()
+  if (api && typeof api.dismiss_health_remind === 'function') {
+    return await api.dismiss_health_remind()
+  }
+  return { ok: true }
 }
 
 /**

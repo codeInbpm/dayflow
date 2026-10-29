@@ -71,3 +71,38 @@ def test_win32_version_info_and_png_icon_on_system_binary():
         assert meta["display_name"] != ""
         assert meta["icon_base64"].startswith("data:image/png;base64,")
 
+
+def test_resolve_browser_tab_category() -> None:
+    from dayflow.app_meta import resolve_browser_tab_category
+
+    # 1. 影音娱乐识别
+    assert (
+        resolve_browser_tab_category("chrome.exe", "【4K】2026最新大片 - 哔哩哔哩_bilibili")
+        == "entertainment"
+    )
+    assert resolve_browser_tab_category("msedge.exe", "YouTube - Home") == "entertainment"
+
+    # 2. 社交通讯识别
+    assert (
+        resolve_browser_tab_category("chrome.exe", "微博 – 随时随地发现新鲜事")
+        == "social"
+    )
+    assert resolve_browser_tab_category("firefox.exe", "知乎 - 有问题就会有答案") == "social"
+
+    # 3. 开发与创意识别
+    assert (
+        resolve_browser_tab_category("msedge.exe", "codeInbpm/dayflow: Desktop usage tracker - GitHub")
+        == "creative"
+    )
+    assert resolve_browser_tab_category("chrome.exe", "ChatGPT - OpenAI") == "creative"
+
+    # 4. 办公与效率识别
+    assert (
+        resolve_browser_tab_category("chrome.exe", "产品设计文档 - 飞书云文档")
+        == "productivity"
+    )
+
+    # 5. 非浏览器或普通页面返回 None 回退为主分类
+    assert resolve_browser_tab_category("notepad.exe", "bilibili") is None
+    assert resolve_browser_tab_category("chrome.exe", "新标签页") is None
+
