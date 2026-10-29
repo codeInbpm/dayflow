@@ -3,12 +3,81 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes as wintypes
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
 
 from dayflow.app_meta import CATEGORY_META
 from dayflow.database import UsageDatabase
 from dayflow.tracker import ForegroundTracker
+
+try:
+    import winreg
+
+    HAS_WINREG = True
+except ImportError:  # pragma: no cover
+    winreg = None  # type: ignore[assignment]
+    HAS_WINREG = False
+
+APP_VERSION = "1.0.0"
+RUN_REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_REG_NAME = "Dayflow"
+
+
+def _build_autostart_command() -> str:
+    """生成写入 Windows 注册表 HKCU\\...\\Run 的开机自启命令行。"""
+    exe_path = Path(sys.executable).resolve()
+    if getattr(sys, "frozen", False):
+        return f'"{exe_path}"'
+    main_script = Path(__file__).resolve().parent.parent / "main.py"
+    # 若存在 pythonw.exe 则优先使用无控制台窗口的 pythonw.exe
+    pythonw = exe_path.with_name("pythonw.exe")
+    runner = pythonw if pythonw.is_file() else exe_path
+    return f'"{runner}" "{main_script}"'
+
+
+def _read_registry_autostart() -> bool | None:
+    """检查当前 Windows 用户注册表中是否已配置 Dayflow 开机自启。"""
+    if not HAS_WINREG or winreg is None:
+        return None
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            RUN_REG_PATH,
+            0,
+            winreg.KEY_READ,
+        ) as key:
+            val, _ = winreg.QueryValueEx(key, RUN_REG_NAME)
+            return bool(val and str(val).strip())
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return None
+
+
+def _write_registry_autostart(enable: bool) -> bool:
+    """在当前 Windows 用户注册表 HKCU\\...\\Run 中启用或移除 Dayflow 开机自启。"""
+    if not HAS_WINREG or winreg is None:
+        return False
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            RUN_REG_PATH,
+            0,
+            winreg.KEY_SET_VALUE,
+        ) as key:
+            if enable:
+                cmd = _build_autostart_command()
+                winreg.SetValueEx(key, RUN_REG_NAME, 0, winreg.REG_SZ, cmd)
+            else:
+                try:
+                    winreg.DeleteValue(key, RUN_REG_NAME)
+                except FileNotFoundError:
+                    pass
+        return True
+    except Exception:
+        return False
 
 try:
     import win32gui
@@ -219,7 +288,31 @@ class DayflowBridge:
             "active_app": active_app,
             "always_on_top": self.always_on_top,
             "timeline": timeline,
+            "preferences": self.get_preferences(),
         }
+
+    def get_preferences(self) -> dict[str, Any]:
+        """获取通用设置（语言、外观、字体大小、开机自启）与版本信息。"""
+        prefs = self.db.get_preferences()
+        reg_state = _read_registry_autostart()
+        if reg_state is not None:
+            prefs["auto_start"] = reg_state
+        prefs["version"] = APP_VERSION
+        return prefs
+
+    def update_preferences(self, updates: dict[str, Any] | None = None) -> dict[str, Any]:
+        """更新通用设置，若包含 auto_start 则同步写入/移除 Windows 注册表开机启动项。"""
+        payload = dict(updates or {})
+        if "auto_start" in payload:
+            want_auto = bool(payload["auto_start"])
+            _write_registry_autostart(want_auto)
+
+        saved = self.db.update_preferences(payload)
+        reg_state = _read_registry_autostart()
+        if reg_state is not None:
+            saved["auto_start"] = reg_state
+        saved["version"] = APP_VERSION
+        return saved
 
     def get_app_detail(self, app_id: int, date_str: str | None = None) -> dict:
         """刷盘当前活跃计时并返回单个软件在指定日期的小时分布与会话明细。"""

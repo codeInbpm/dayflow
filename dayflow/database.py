@@ -89,6 +89,14 @@ class UsageDatabase:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sessions_app_date ON usage_sessions(app_id, date_str);"
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                """
+            )
 
     def close(self) -> None:
         with self._lock:
@@ -896,3 +904,76 @@ class UsageDatabase:
                 "category_totals": category_totals,
                 "apps": apps,
             }
+
+    def get_preferences(self) -> dict[str, object]:
+        """获取用户偏好设置（语言、外观主题、字体缩放级别、开机自启标记）。"""
+        defaults: dict[str, object] = {
+            "language": "system",  # 'system' | 'zh-CN' | 'en' | 'zh-TW'
+            "theme": "dark",       # 'system' | 'dark' | 'light'
+            "font_scale": 1.0,     # 0.92 ~ 1.20
+            "auto_start": False,
+        }
+        with self._lock:
+            rows = self._conn.execute("SELECT key, value FROM user_preferences").fetchall()
+            raw = {str(r["key"]): str(r["value"]) for r in rows}
+
+        lang = raw.get("language", str(defaults["language"]))
+        if lang not in ("system", "zh-CN", "en", "zh-TW"):
+            lang = "system"
+
+        theme = raw.get("theme", str(defaults["theme"]))
+        if theme not in ("system", "dark", "light"):
+            theme = "dark"
+
+        try:
+            font_scale = float(raw.get("font_scale", "1.0"))
+            font_scale = max(0.85, min(1.30, round(font_scale, 2)))
+        except Exception:
+            font_scale = 1.0
+
+        auto_start = raw.get("auto_start", "0") in ("1", "true", "True")
+        return {
+            "language": lang,
+            "theme": theme,
+            "font_scale": font_scale,
+            "auto_start": auto_start,
+        }
+
+    def update_preferences(self, updates: dict[str, object]) -> dict[str, object]:
+        """更新并保存用户偏好设置。"""
+        current = self.get_preferences()
+        merged = {**current, **(updates or {})}
+
+        lang = str(merged.get("language", "system"))
+        if lang not in ("system", "zh-CN", "en", "zh-TW"):
+            lang = "system"
+
+        theme = str(merged.get("theme", "dark"))
+        if theme not in ("system", "dark", "light"):
+            theme = "dark"
+
+        try:
+            font_scale = float(merged.get("font_scale", 1.0))
+            font_scale = max(0.85, min(1.30, round(font_scale, 2)))
+        except Exception:
+            font_scale = 1.0
+
+        auto_start = bool(merged.get("auto_start", False))
+
+        to_store = {
+            "language": lang,
+            "theme": theme,
+            "font_scale": str(font_scale),
+            "auto_start": "1" if auto_start else "0",
+        }
+        with self._lock, self._conn:
+            for k, v in to_store.items():
+                self._conn.execute(
+                    """
+                    INSERT INTO user_preferences (key, value)
+                    VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (k, v),
+                )
+        return self.get_preferences()

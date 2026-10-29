@@ -222,3 +222,28 @@ def test_bridge_period_summaries_and_quit_app(tmp_path):
     assert res_quit == {"ok": True, "quitting": True}
     assert quit_called == [True]
     db.close()
+
+
+def test_bridge_preferences_and_version(tmp_path):
+    db = UsageDatabase(tmp_path / "bridge_prefs.db")
+    tracker = ForegroundTracker(db)
+    bridge = DayflowBridge(db, tracker)
+
+    prefs = bridge.get_preferences()
+    assert prefs["language"] == "system"
+    assert prefs["theme"] == "dark"
+    assert prefs["font_scale"] == 1.0
+    assert prefs["version"] == "1.0.0"
+
+    updated = bridge.update_preferences(
+        {
+            "language": "en",
+            "theme": "light",
+            "font_scale": 1.15,
+        }
+    )
+    assert updated["language"] == "en"
+    assert updated["theme"] == "light"
+    assert updated["font_scale"] == 1.15
+    assert updated["version"] == "1.0.0"
+    db.close()

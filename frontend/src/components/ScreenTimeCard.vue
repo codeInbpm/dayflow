@@ -11,6 +11,7 @@ import {
 } from 'lucide-vue-next'
 import HourlyBarChart from './HourlyBarChart.vue'
 import { CATEGORY_META, formatDuration } from '../api/bridge'
+import { i18n } from '../i18n'
 
 const props = defineProps({
   dashboard: {
@@ -79,11 +80,13 @@ const emit = defineEmits([
   'update:selectedCategory',
 ])
 
-const PERIOD_TABS = [
-  { key: 'day', label: '每日' },
-  { key: 'week', label: '每周' },
-  { key: 'month', label: '每月' },
-]
+const t = computed(() => i18n.value)
+
+const PERIOD_TABS = computed(() => [
+  { key: 'day', label: t.value.periodDay },
+  { key: 'week', label: t.value.periodWeek },
+  { key: 'month', label: t.value.periodMonth },
+])
 
 const resolvedPeriod = computed(() => props.period || props.dashboard?.period || 'day')
 
@@ -347,7 +350,7 @@ function handleCategoryClick(catKey) {
         class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.03] border border-white/[0.05] text-[11px] text-zinc-400"
       >
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span>{{ resolvedActiveApp ? '实时采集中' : '后台就绪' }}</span>
+        <span>{{ resolvedActiveApp ? t.statusCollecting : t.statusReady }}</span>
       </div>
     </div>
 
@@ -393,11 +396,11 @@ function handleCategoryClick(catKey) {
       <button
         v-if="canGoNextDate"
         type="button"
-        class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-[11px] font-medium text-blue-300 transition-colors cursor-pointer"
+        class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-[11px] font-medium text-blue-400 transition-colors cursor-pointer"
         @click="handleBackToToday"
       >
         <RotateCcw class="w-3 h-3" />
-        <span>{{ resolvedPeriod === 'week' ? '回到本周' : resolvedPeriod === 'month' ? '回到本月' : '回到今日' }}</span>
+        <span>{{ resolvedPeriod === 'week' ? t.backToWeek : resolvedPeriod === 'month' ? t.backToMonth : t.backToToday }}</span>
       </button>
 
       <!-- 周/月模式下展示日均使用时长 -->
@@ -405,7 +408,7 @@ function handleCategoryClick(catKey) {
         v-else-if="resolvedPeriod !== 'day'"
         class="text-[11px] font-medium text-zinc-400"
       >
-        日均 {{ formatDuration(resolvedDailyAvgSec) }}
+        {{ t.dailyAvg }} {{ formatDuration(resolvedDailyAvgSec) }}
       </span>
     </div>
 
@@ -414,15 +417,15 @@ function handleCategoryClick(catKey) {
       <div>
         <div class="text-[11px] text-zinc-400 mb-0.5 font-medium">
           <template v-if="resolvedPeriod === 'week'">
-            本周累计使用
-            <span v-if="canGoNextDate" class="text-zinc-500">· 日均 {{ formatDuration(resolvedDailyAvgSec) }}</span>
+            {{ t.weekTotalTitle }}
+            <span v-if="canGoNextDate" class="text-zinc-500">· {{ t.dailyAvg }} {{ formatDuration(resolvedDailyAvgSec) }}</span>
           </template>
           <template v-else-if="resolvedPeriod === 'month'">
-            本月累计使用
-            <span v-if="canGoNextDate" class="text-zinc-500">· 日均 {{ formatDuration(resolvedDailyAvgSec) }}</span>
+            {{ t.monthTotalTitle }}
+            <span v-if="canGoNextDate" class="text-zinc-500">· {{ t.dailyAvg }} {{ formatDuration(resolvedDailyAvgSec) }}</span>
           </template>
           <template v-else>
-            屏幕使用时间
+            {{ t.screenTimeTitle }}
           </template>
         </div>
 
@@ -431,21 +434,21 @@ function handleCategoryClick(catKey) {
             <span class="text-[34px] leading-none font-bold tracking-tight text-white">
               {{ totalDurationParts.hours }}
             </span>
-            <span class="text-[18px] font-semibold text-zinc-300 mr-1">小时</span>
+            <span class="text-[18px] font-semibold text-zinc-300 mr-1">{{ t.unitHour }}</span>
           </template>
 
           <template v-if="totalDurationParts.minutes > 0 || totalDurationParts.hours > 0">
             <span class="text-[34px] leading-none font-bold tracking-tight text-white">
               {{ totalDurationParts.minutes }}
             </span>
-            <span class="text-[18px] font-semibold text-zinc-300">分钟</span>
+            <span class="text-[18px] font-semibold text-zinc-300">{{ t.unitMinute }}</span>
           </template>
 
           <template v-if="totalDurationParts.hours === 0 && totalDurationParts.minutes === 0">
             <span class="text-[32px] leading-none font-bold tracking-tight text-white">
               {{ totalDurationParts.seconds }}
             </span>
-            <span class="text-[16px] font-semibold text-zinc-300">秒</span>
+            <span class="text-[16px] font-semibold text-zinc-300">{{ t.unitSecond }}</span>
           </template>
         </div>
       </div>

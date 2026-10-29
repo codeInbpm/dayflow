@@ -555,6 +555,38 @@ export async function quitApp() {
   return { ok: true, quitting: true }
 }
 
+const mockPreferences = {
+  language: 'system',
+  theme: 'dark',
+  font_scale: 1.0,
+  auto_start: false,
+  version: '1.0.0',
+}
+
+/**
+ * 获取通用偏好设置与版本信息
+ */
+export async function fetchPreferences() {
+  const api = getPyApi()
+  if (api && typeof api.get_preferences === 'function') {
+    return await api.get_preferences()
+  }
+  return { ...mockPreferences }
+}
+
+/**
+ * 更新通用偏好设置（语言、外观、字体大小、开机自启）
+ * @param {Object} updates
+ */
+export async function savePreferences(updates = {}) {
+  const api = getPyApi()
+  if (api && typeof api.update_preferences === 'function') {
+    return await api.update_preferences(updates)
+  }
+  Object.assign(mockPreferences, updates)
+  return { ...mockPreferences }
+}
+
 /**
  * 将秒数格式化为中文人类可读时长（如 "12小时 28分钟"、"45分钟"、"32秒"）
  */

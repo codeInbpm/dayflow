@@ -13,14 +13,17 @@ import TitleBar from './components/TitleBar.vue'
 import ScreenTimeCard from './components/ScreenTimeCard.vue'
 import AppUsageGrid from './components/AppUsageGrid.vue'
 import AppDetailModal from './components/AppDetailModal.vue'
+import SettingsModal from './components/SettingsModal.vue'
 import {
   CATEGORY_META,
   CATEGORY_ORDER,
   fetchDashboardData,
   fetchIgnoredApps,
+  fetchPreferences,
   updateAppSettings,
   formatDuration,
 } from './api/bridge'
+import { i18n, applyPreferencesToDom } from './i18n'
 
 const activeTab = ref('dashboard')
 const selectedDate = ref(null)
@@ -32,17 +35,21 @@ const timelineSortDesc = ref(true)
 const dashboard = ref({})
 const ignoredApps = ref([])
 
-// 软件详情抽屉状态
+// 软件详情抽屉与设置弹窗状态
 const isDetailOpen = ref(false)
 const activeModalApp = ref(null)
 const detailModalRef = ref(null)
+const isSettingsOpen = ref(false)
 
 let pollTimer = null
+let mediaQueryList = null
+
+const t = computed(() => i18n.value)
 
 const categoryMeta = computed(() => dashboard.value?.category_meta || CATEGORY_META)
 
 const categoryFilterPills = computed(() => {
-  const list = [{ key: 'all', label: '全部', color: '#3B82F6' }]
+  const list = [{ key: 'all', label: t.value.catAll, color: '#3B82F6' }]
   for (const key of CATEGORY_ORDER) {
     const meta = categoryMeta.value[key] || CATEGORY_META[key]
     if (meta) {
@@ -100,6 +107,9 @@ async function loadData(
       if (!selectedDate.value && data.date_str) {
         selectedDate.value = data.date_str
       }
+      if (!silent && data.preferences) {
+        applyPreferencesToDom(data.preferences)
+      }
     }
     ignoredApps.value = await fetchIgnoredApps()
     if (silent && isDetailOpen.value && detailModalRef.value) {
@@ -141,11 +151,35 @@ async function handleRestoreIgnoredApp(app) {
   await loadData(selectedDate.value, false, selectedPeriod.value)
 }
 
-onMounted(() => {
+function handleAlwaysOnTopSync(val) {
+  dashboard.value = {
+    ...dashboard.value,
+    always_on_top: Boolean(val),
+  }
+}
+
+function handleSystemThemeChange() {
+  applyPreferencesToDom()
+}
+
+onMounted(async () => {
+  try {
+    const prefs = await fetchPreferences()
+    if (prefs) {
+      applyPreferencesToDom(prefs)
+    }
+  } catch (_e) {
+    // ignore
+  }
   loadData()
   pollTimer = setInterval(() => {
     loadData(selectedDate.value, true, selectedPeriod.value)
   }, 2000)
+
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    mediaQueryList = window.matchMedia('(prefers-color-scheme: light)')
+    mediaQueryList.addEventListener?.('change', handleSystemThemeChange)
+  }
 })
 
 onUnmounted(() => {
@@ -153,17 +187,22 @@ onUnmounted(() => {
     clearInterval(pollTimer)
     pollTimer = null
   }
+  if (mediaQueryList) {
+    mediaQueryList.removeEventListener?.('change', handleSystemThemeChange)
+  }
 })
 </script>
 
 <template>
-  <div class="flex flex-col h-screen w-screen bg-[#141417] text-zinc-100 overflow-hidden select-none">
+  <div class="app-root-shell flex flex-col h-screen w-screen bg-[#141417] text-zinc-100 overflow-hidden select-none">
     <!-- 顶部无边框窗口控制栏与四合一胶囊导航 -->
     <TitleBar
       v-model:activeTab="activeTab"
       :always-on-top="Boolean(dashboard.always_on_top)"
       :ignored-count="ignoredApps.length"
       :active-app="dashboard.active_app"
+      @open-settings="isSettingsOpen = true"
+      @update:always-on-top="handleAlwaysOnTopSync"
     />
 
     <!-- 主内容滚动视图 -->
@@ -199,11 +238,11 @@ onUnmounted(() => {
           <div class="flex items-center gap-2">
             <Calendar class="w-4 h-4 text-blue-400" />
             <span class="text-[12px] font-semibold text-zinc-200">
-              {{ dashboard.period_label || selectedDate || dashboard.date_str || '今日' }} · 软件时长排行
+              {{ dashboard.period_label || selectedDate || dashboard.date_str || '今日' }} · {{ t.rankingTitleSuffix }}
             </span>
           </div>
-          <div class="text-[12px] font-semibold text-blue-400">
-            总计 {{ formatDuration(dashboard.total_sec || 0) }}
+          <div class="text-[12px] font-semibold text-blue-500">
+            {{ t.totalPrefix }} {{ formatDuration(dashboard.total_sec || 0) }}
           </div>
         </div>
 
@@ -227,10 +266,10 @@ onUnmounted(() => {
             <div class="flex items-center gap-2">
               <Clock3 class="w-4 h-4 text-blue-400" />
               <h2 class="text-[13px] font-semibold text-zinc-100">
-                时段使用流水 ({{ dashboard.period_label || '今日' }})
+                {{ t.timelineTitle }} ({{ dashboard.period_label || '今日' }})
               </h2>
               <span class="px-1.5 py-0.5 rounded-md bg-white/[0.05] text-[11px] text-zinc-400">
-                {{ filteredTimeline.length }} 条记录
+                {{ filteredTimeline.length }} {{ t.recordsSuffix }}
               </span>
             </div>
 
@@ -240,7 +279,7 @@ onUnmounted(() => {
               @click="timelineSortDesc = !timelineSortDesc"
             >
               <ArrowUpDown class="w-3 h-3 text-blue-400" />
-              <span>{{ timelineSortDesc ? '最新时段在前' : '00:00 顺序排列' }}</span>
+              <span>{{ timelineSortDesc ? t.sortNewest : t.sortChrono }}</span>
             </button>
           </div>
 
@@ -296,7 +335,7 @@ onUnmounted(() => {
                 <div class="flex items-center gap-2">
                   <span
                     v-if="selectedPeriod !== 'day' && record.date_str"
-                    class="px-1.5 py-0.5 rounded bg-blue-500/15 text-[10.5px] font-mono text-blue-300 shrink-0"
+                    class="px-1.5 py-0.5 rounded bg-blue-500/15 text-[10.5px] font-mono text-blue-400 shrink-0"
                   >
                     {{ record.date_str.slice(5) }}
                   </span>
@@ -337,7 +376,7 @@ onUnmounted(() => {
             v-else
             class="py-10 text-center rounded-xl bg-white/[0.02] border border-dashed border-white/[0.06] text-[12px] text-zinc-500"
           >
-            当前筛选条件下暂无时段使用流水
+            {{ t.emptyTimeline }}
           </div>
         </section>
       </template>
@@ -349,11 +388,11 @@ onUnmounted(() => {
             <div class="flex items-center gap-2">
               <EyeOff class="w-4 h-4 text-zinc-400" />
               <h2 class="text-[13px] font-semibold text-zinc-100">
-                已屏蔽的软件名单
+                {{ t.ignoredListTitle }}
               </h2>
             </div>
             <span class="text-[11px] text-zinc-500">
-              不计入屏幕使用时长
+              {{ t.ignoredHint }}
             </span>
           </div>
 
@@ -389,11 +428,11 @@ onUnmounted(() => {
 
               <button
                 type="button"
-                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-medium text-emerald-300 transition-colors shrink-0 cursor-pointer"
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-medium text-emerald-500 transition-colors shrink-0 cursor-pointer"
                 @click="handleRestoreIgnoredApp(app)"
               >
                 <Eye class="w-3.5 h-3.5" />
-                <span>恢复统计</span>
+                <span>{{ t.restoreTrack }}</span>
               </button>
             </div>
           </div>
@@ -403,9 +442,9 @@ onUnmounted(() => {
             class="flex flex-col items-center justify-center py-10 text-center rounded-xl bg-white/[0.02] border border-dashed border-white/[0.06]"
           >
             <ShieldAlert class="w-6 h-6 text-zinc-500 mb-2" />
-            <p class="text-[12px] text-zinc-400">当前没有被屏蔽的软件</p>
+            <p class="text-[12px] text-zinc-400">{{ t.emptyIgnored }}</p>
             <p class="text-[11px] text-zinc-500 mt-1">
-              可在任意软件的详情面板中点击“屏蔽此软件”将其排除统计
+              {{ t.emptyIgnoredSub }}
             </p>
           </div>
         </section>
@@ -422,6 +461,13 @@ onUnmounted(() => {
       :active-app="dashboard.active_app"
       :category-meta="categoryMeta"
       @updated="handleAppUpdated"
+    />
+
+    <!-- 微信桌面版风格设置面板（通用：语言/外观/字体大小滑块/开机自启 + 关于 Dayflow：版本号） -->
+    <SettingsModal
+      v-model="isSettingsOpen"
+      :always-on-top="Boolean(dashboard.always_on_top)"
+      @update:always-on-top="handleAlwaysOnTopSync"
     />
   </div>
 </template>

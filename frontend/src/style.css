@@ -21,9 +21,17 @@
     user-select: none;
     overflow: hidden;
   }
+
+  html.theme-light,
+  html.theme-light body,
+  html.theme-light #app {
+    color-scheme: light;
+    background-color: #f2f2f6;
+    color: #18181b;
+  }
 }
 
-/* Windows 11 现代深色细滚动条 */
+/* Windows 11 现代细滚动条 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -40,6 +48,14 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.24);
+}
+
+html.theme-light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+html.theme-light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
 }
 
 /* 暗夜灰桌面软件质感卡片与描边 */
@@ -59,6 +75,79 @@
   background: rgba(40, 40, 50, 0.95);
   border-color: rgba(255, 255, 255, 0.13);
   transform: translateY(-1px);
+}
+
+/* 浅色模式 (Light Mode) 全面适配 */
+html.theme-light .win-surface-card {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 16px -4px rgba(0, 0, 0, 0.05);
+}
+
+html.theme-light .win-tile-card {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+html.theme-light .win-tile-card:hover {
+  background: #fafafa;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+html.theme-light .app-root-shell {
+  background-color: #f2f2f6 !important;
+  color: #18181b !important;
+}
+
+html.theme-light .titlebar-shell {
+  background-color: rgba(247, 247, 250, 0.95) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.07) !important;
+}
+
+html.theme-light .titlebar-nav {
+  background-color: #e8e8ee !important;
+  border-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+html.theme-light .titlebar-nav-active {
+  background-color: #ffffff !important;
+  color: #18181b !important;
+  border-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+html.theme-light .text-white,
+html.theme-light .text-zinc-100,
+html.theme-light .text-zinc-200 {
+  color: #18181b !important;
+}
+
+html.theme-light .text-zinc-300 {
+  color: #3f3f46 !important;
+}
+
+html.theme-light .text-zinc-400 {
+  color: #52525b !important;
+}
+
+html.theme-light .bg-white\/\[0\.04\],
+html.theme-light .bg-white\/\[0\.03\],
+html.theme-light .bg-white\/\[0\.02\] {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+}
+
+html.theme-light .bg-white\/\[0\.06\],
+html.theme-light .bg-white\/\[0\.08\],
+html.theme-light .bg-white\/\[0\.1\] {
+  background-color: rgba(0, 0, 0, 0.07) !important;
+}
+
+html.theme-light .border-white\/\[0\.04\],
+html.theme-light .border-white\/\[0\.05\],
+html.theme-light .border-white\/\[0\.06\],
+html.theme-light .border-white\/\[0\.08\],
+html.theme-light .border-white\/\[0\.15\] {
+  border-color: rgba(0, 0, 0, 0.08) !important;
 }
 
 /* 柱状图平滑生长动画 */
