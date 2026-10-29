@@ -42,6 +42,8 @@ def copy_to_windows_clipboard(text: str) -> bool:
         proc = subprocess.Popen(
             ["clip.exe"],
             stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             close_fds=True,
         )
         proc.communicate(input=text.encode("utf-16-le"), timeout=3)
@@ -529,9 +531,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Dayflow 闲鱼商品上架与 24 小时自动发货机器人")
     parser.add_argument(
         "--mode",
-        choices=["watch", "publish", "preview"],
-        default="watch",
-        help="运行模式：watch=24h自动发货值守 (默认)，publish=上架商品到闲鱼，preview=生成宣传图并预览文案",
+        choices=["menu", "watch", "publish", "preview"],
+        default="menu",
+        help="运行模式：menu=交互式菜单 (默认)，watch=24h自动发货值守，publish=上架商品到闲鱼，preview=生成宣传图并预览文案",
     )
     parser.add_argument(
         "--interval",
@@ -546,9 +548,32 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.mode == "preview":
+    mode = args.mode
+    if mode == "menu":
+        print("=" * 72)
+        print("   Dayflow - 闲鱼 (Goofish) 自动上架与 24h 夸克网盘自动发货助手")
+        print("=" * 72)
+        print(f"   绑定夸克网盘: {QUARK_SHARE_URL}")
+        print(f"   提取码: {QUARK_EXTRACT_CODE}   |   口令: {QUARK_TOKEN}")
+        print("=" * 72)
+        print("   [1] 启动 24 小时自动发货机器人 (监控闲鱼消息并自动发送夸克网盘链接)")
+        print("   [2] 一键发布/上架 Dayflow 到闲鱼 (生成首图 + 自动复制文案 + 打开闲鱼)")
+        print("   [3] 仅生成宣传首图并预览上架文案与发货话术")
+        print("-" * 72)
+        try:
+            choice = input("👉 请输入数字 [1/2/3] 并回车 (直接回车默认选 1): ").strip()
+        except EOFError:
+            choice = "1"
+        if choice == "2":
+            mode = "publish"
+        elif choice == "3":
+            mode = "preview"
+        else:
+            mode = "watch"
+
+    if mode == "preview":
         return print_dry_run_summary()
-    if args.mode == "publish":
+    if mode == "publish":
         return run_publish_Flow(headless=args.headless)
     return run_auto_delivery_watch(poll_interval=args.interval, headless=args.headless)
 
