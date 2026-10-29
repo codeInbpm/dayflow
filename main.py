@@ -156,7 +156,12 @@ def run_smoke_test(db_path: Path, duration_sec: float = 2.0) -> int:
     return 0
 
 
-def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SERVER_URL) -> int:
+def run_desktop_app(
+    db_path: Path,
+    dev_mode: bool = False,
+    dev_url: str = DEV_SERVER_URL,
+    autostart: bool = False,
+) -> int:
     """启动 Dayflow 后台采样守护线程、系统托盘与 PyWebView 桌面窗口。"""
     set_windows_app_user_model_id()
     if not ensure_single_instance():
@@ -195,6 +200,7 @@ def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SE
         frameless=True,
         easy_drag=False,
         on_top=False,
+        hidden=autostart,
         background_color="#18181B",
     )
     window_ref["win"] = win
@@ -205,6 +211,8 @@ def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SE
             hwnd = bridge._resolve_hwnd(win)
             if hwnd:
                 bridge.enable_taskbar_minimize_toggle(hwnd)
+                if autostart:
+                    bridge.hide_to_tray()
         except Exception:
             pass
 
@@ -286,15 +294,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=str(DEFAULT_DB_PATH),
         help="指定 SQLite 数据库文件路径",
     )
+    parser.add_argument(
+        "--autostart",
+        action="store_true",
+        help="开机自启动模式（启动后托盘常驻后台采集，不主动弹出主窗口）",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
+    if getattr(sys, "frozen", False):
+        try:
+            os.chdir(Path(sys.executable).resolve().parent)
+        except Exception:
+            pass
+    else:
+        try:
+            os.chdir(Path(__file__).resolve().parent)
+        except Exception:
+            pass
+
     args = parse_args(argv)
     db_path = Path(args.db)
     if args.smoke_test:
         return run_smoke_test(db_path=db_path, duration_sec=2.0)
-    return run_desktop_app(db_path=db_path, dev_mode=args.dev, dev_url=args.dev_url)
+    return run_desktop_app(
+        db_path=db_path,
+        dev_mode=args.dev,
+        dev_url=args.dev_url,
+        autostart=bool(args.autostart),
+    )
 
 
 if __name__ == "__main__":

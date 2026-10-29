@@ -52,6 +52,8 @@ def main() -> int:
         f"--icon={icon_path}",
         f"--add-data={dist_frontend};frontend/dist",
         f"--add-data={icon_path};assets",
+        "--hidden-import=win32com",
+        "--hidden-import=win32com.client",
         "--exclude-module=pytest",
         "--exclude-module=unittest",
         f"--distpath={root_dir / 'release'}",

@@ -361,3 +361,46 @@ def test_taskbar_minimize_toggle_and_qq_top_edge_autohide(tmp_path, monkeypatch)
     assert bridge._docked_top is False
     assert bridge._dock_collapsed is False
     db.close()
+
+
+def test_autostart_startup_shortcut_and_preferences(tmp_path, monkeypatch):
+    """测试 Windows 启动文件夹快捷方式与 preferences 设置联动的开机自启逻辑。"""
+    import dayflow.bridge as bridge_mod
+
+    fake_startup = tmp_path / "Startup"
+    fake_startup.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(bridge_mod, "_get_startup_folder", lambda: fake_startup)
+
+    db = UsageDatabase(tmp_path / "test_autostart.db")
+    tracker = ForegroundTracker(db)
+    bridge = DayflowBridge(db, tracker)
+
+    # 初始状态：未配置自启动
+    assert bridge_mod._read_registry_autostart() is False
+
+    # 1. 启用自启动 -> 触发快捷方式/引导文件创建
+    ok = bridge_mod._write_registry_autostart(True)
+    assert ok is True
+    assert bridge_mod._read_registry_autostart() is True
+    # 验证 fake_startup 目录下存在 Dayflow.lnk 或 Dayflow.bat
+    created_files = [f.name for f in fake_startup.iterdir()]
+    assert any(name in ("Dayflow.lnk", "Dayflow.bat") for name in created_files)
+
+    # 2. 检查 bridge.get_preferences 状态同步
+    prefs = bridge.get_preferences()
+    assert prefs["auto_start"] is True
+
+    # 3. 通过 bridge.update_preferences 关闭自启动
+    updated = bridge.update_preferences({"auto_start": False})
+    assert updated["auto_start"] is False
+    assert bridge_mod._read_registry_autostart() is False
+    assert not (fake_startup / "Dayflow.lnk").exists()
+    assert not (fake_startup / "Dayflow.bat").exists()
+
+    # 4. 再次通过 bridge.update_preferences 开启自启动
+    updated2 = bridge.update_preferences({"auto_start": True})
+    assert updated2["auto_start"] is True
+    assert bridge_mod._read_registry_autostart() is True
+    assert any(f.name in ("Dayflow.lnk", "Dayflow.bat") for f in fake_startup.iterdir())
+
+    db.close()

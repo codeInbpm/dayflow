@@ -27,22 +27,39 @@ def get_install_dir() -> Path:
 
 
 def remove_auto_start_registry() -> bool:
-    """移除 Windows 注册表中的 Dayflow 开机自启项。"""
-    if sys.platform != "win32":
-        return False
+    """移除 Windows 启动文件夹快捷方式与注册表中的 Dayflow 开机自启项。"""
+    cleaned = False
+    # 1. 清理开机启动文件夹下的快捷方式与批处理
     try:
-        import winreg
-
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER, RUN_REG_PATH, 0, winreg.KEY_SET_VALUE
-        ) as key:
-            try:
-                winreg.DeleteValue(key, RUN_REG_NAME)
-                return True
-            except FileNotFoundError:
-                return False
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            startup_dir = Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+        else:
+            startup_dir = Path.home() / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+        for name in ("Dayflow.lnk", "Dayflow.bat"):
+            p = startup_dir / name
+            if p.exists():
+                p.unlink(missing_ok=True)
+                cleaned = True
     except Exception:
-        return False
+        pass
+
+    # 2. 清理注册表 HKCU\...\Run 键
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER, RUN_REG_PATH, 0, winreg.KEY_SET_VALUE
+            ) as key:
+                try:
+                    winreg.DeleteValue(key, RUN_REG_NAME)
+                    cleaned = True
+                except FileNotFoundError:
+                    pass
+        except Exception:
+            pass
+    return cleaned
 
 
 def stop_running_dayflow() -> None:

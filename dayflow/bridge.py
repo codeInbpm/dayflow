@@ -24,25 +24,137 @@ except ImportError:  # pragma: no cover
 
 APP_VERSION = "1.0.0"
 RUN_REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
+STARTUP_APPROVED_PATH = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 RUN_REG_NAME = "Dayflow"
+
+
+def _get_startup_folder() -> Path:
+    """获取当前 Windows 用户的开机启动文件夹目录路径。"""
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        folder = Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+    else:
+        folder = Path.home() / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return folder
+
+
+def _get_startup_shortcut_path() -> Path:
+    """获取开机启动文件夹中 Dayflow.lnk 快捷方式的绝对路径。"""
+    return _get_startup_folder() / "Dayflow.lnk"
+
+
+def _get_autostart_target() -> tuple[Path, Path, str]:
+    """计算自启动时的可执行程序路径、工作目录和附加启动参数。"""
+    if getattr(sys, "frozen", False):
+        exe_path = Path(sys.executable).resolve()
+        working_dir = exe_path.parent
+        args = "--autostart"
+    else:
+        main_script = Path(__file__).resolve().parent.parent / "main.py"
+        python_exe = Path(sys.executable).resolve()
+        pythonw = python_exe.with_name("pythonw.exe")
+        exe_path = pythonw if pythonw.is_file() else python_exe
+        working_dir = main_script.parent
+        args = f'"{main_script}" --autostart'
+    return exe_path, working_dir, args
+
+
+def _create_startup_shortcut(target_exe: Path, working_dir: Path, args: str = "--autostart") -> bool:
+    """在 Windows 启动文件夹中创建 Dayflow.lnk 快捷方式（双保险自启核心）。"""
+    lnk_path = _get_startup_shortcut_path()
+    # 策略 1：使用 pywin32 WScript.Shell 原生创建
+    try:
+        import win32com.client
+
+        shell = win32com.client.Dispatch("WScript.Shell")
+        shortcut = shell.CreateShortcut(str(lnk_path))
+        shortcut.TargetPath = str(target_exe)
+        shortcut.WorkingDirectory = str(working_dir)
+        shortcut.Arguments = args
+        shortcut.Description = "Dayflow 桌面使用时长管家"
+        shortcut.Save()
+        if lnk_path.is_file():
+            return True
+    except Exception:
+        pass
+
+    # 策略 2：调用 PowerShell 脚本创建快捷方式
+    try:
+        import subprocess
+
+        ps_script = (
+            f'$ws = New-Object -ComObject WScript.Shell; '
+            f'$s = $ws.CreateShortcut("{lnk_path}"); '
+            f'$s.TargetPath = "{target_exe}"; '
+            f'$s.WorkingDirectory = "{working_dir}"; '
+            f'$s.Arguments = "{args}"; '
+            f'$s.Description = "Dayflow 桌面使用时长管家"; '
+            f'$s.Save()'
+        )
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            timeout=5,
+        )
+        if lnk_path.is_file():
+            return True
+    except Exception:
+        pass
+
+    # 策略 3：回退至启动文件夹直接写入 Dayflow.bat 批处理引导文件
+    try:
+        bat_path = _get_startup_folder() / "Dayflow.bat"
+        bat_content = f'@echo off\r\nstart "" /D "{working_dir}" "{target_exe}" {args}\r\n'
+        bat_path.write_text(bat_content, encoding="utf-8")
+        return bat_path.is_file()
+    except Exception:
+        pass
+
+    return False
+
+
+def _remove_startup_shortcut() -> bool:
+    """清理 Windows 启动文件夹中的 Dayflow.lnk 快捷方式或引导批处理。"""
+    cleaned = False
+    for fname in ("Dayflow.lnk", "Dayflow.bat"):
+        try:
+            f = _get_startup_folder() / fname
+            if f.exists():
+                f.unlink(missing_ok=True)
+                cleaned = True
+        except Exception:
+            pass
+    return cleaned
 
 
 def _build_autostart_command() -> str:
     """生成写入 Windows 注册表 HKCU\\...\\Run 的开机自启命令行。"""
-    exe_path = Path(sys.executable).resolve()
-    if getattr(sys, "frozen", False):
-        return f'"{exe_path}"'
-    main_script = Path(__file__).resolve().parent.parent / "main.py"
-    # 若存在 pythonw.exe 则优先使用无控制台窗口的 pythonw.exe
-    pythonw = exe_path.with_name("pythonw.exe")
-    runner = pythonw if pythonw.is_file() else exe_path
-    return f'"{runner}" "{main_script}"'
+    exe_path, _, args = _get_autostart_target()
+    if args:
+        return f'"{exe_path}" {args}'
+    return f'"{exe_path}"'
 
 
 def _read_registry_autostart() -> bool | None:
-    """检查当前 Windows 用户注册表中是否已配置 Dayflow 开机自启。"""
+    """检查当前 Windows 用户注册表与启动文件夹中是否已配置 Dayflow 开机自启。"""
+    # 1. 优先检查启动文件夹中的快捷方式或批处理文件是否存在
+    try:
+        lnk = _get_startup_shortcut_path()
+        bat = _get_startup_folder() / "Dayflow.bat"
+        if lnk.is_file() or bat.is_file():
+            return True
+    except Exception:
+        pass
+
+    # 2. 检查注册表 HKCU\...\Run 键
     if not HAS_WINREG or winreg is None:
-        return None
+        return False
     try:
         with winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
@@ -55,31 +167,75 @@ def _read_registry_autostart() -> bool | None:
     except FileNotFoundError:
         return False
     except Exception:
-        return None
+        return False
 
 
 def _write_registry_autostart(enable: bool) -> bool:
-    """在当前 Windows 用户注册表 HKCU\\...\\Run 中启用或移除 Dayflow 开机自启。"""
-    if not HAS_WINREG or winreg is None:
-        return False
-    try:
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            RUN_REG_PATH,
-            0,
-            winreg.KEY_SET_VALUE,
-        ) as key:
-            if enable:
-                cmd = _build_autostart_command()
-                winreg.SetValueEx(key, RUN_REG_NAME, 0, winreg.REG_SZ, cmd)
-            else:
-                try:
-                    winreg.DeleteValue(key, RUN_REG_NAME)
-                except FileNotFoundError:
-                    pass
-        return True
-    except Exception:
-        return False
+    """在 Windows 启动文件夹及注册表 HKCU\\...\\Run 中启用或移除 Dayflow 开机自启（双保险机制）。"""
+    success = False
+    target_exe, working_dir, args = _get_autostart_target()
+
+    if enable:
+        # A. 写入 Windows 启动文件夹快捷方式（最原生稳定，不受注册表权限和杀软静默拦截）
+        if _create_startup_shortcut(target_exe, working_dir, args):
+            success = True
+
+        # B. 同步写入注册表 HKCU\...\Run
+        if HAS_WINREG and winreg is not None:
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    RUN_REG_PATH,
+                    0,
+                    winreg.KEY_SET_VALUE,
+                ) as key:
+                    cmd = _build_autostart_command()
+                    winreg.SetValueEx(key, RUN_REG_NAME, 0, winreg.REG_SZ, cmd)
+                    success = True
+            except Exception:
+                pass
+
+            # C. 检查并清理或启用 StartupApproved\Run（避免被 Windows 系统静默禁用）
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    STARTUP_APPROVED_PATH,
+                    0,
+                    winreg.KEY_SET_VALUE,
+                ) as app_key:
+                    # 首字节 0x02 表示 Windows 允许自启动
+                    winreg.SetValueEx(
+                        app_key,
+                        RUN_REG_NAME,
+                        0,
+                        winreg.REG_BINARY,
+                        b"\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+                    )
+            except Exception:
+                pass
+    else:
+        # 移除启动文件夹快捷方式
+        if _remove_startup_shortcut():
+            success = True
+
+        # 移除注册表 Run 键
+        if HAS_WINREG and winreg is not None:
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    RUN_REG_PATH,
+                    0,
+                    winreg.KEY_SET_VALUE,
+                ) as key:
+                    try:
+                        winreg.DeleteValue(key, RUN_REG_NAME)
+                        success = True
+                    except FileNotFoundError:
+                        success = True
+            except Exception:
+                pass
+
+    return success
 
 try:
     import win32gui
