@@ -34,7 +34,9 @@ SW_MINIMIZE = 6
 SW_RESTORE = 9
 
 if os.name == "nt":
-    _user32 = ctypes.windll.user32
+    # 使用独立 WinDLL("user32") 实例，避免修改全局 ctypes.windll.user32.SetWindowPos.argtypes
+    # 导致 pywebview 内部 winforms.move() 传入 None 时抛出 ctypes.ArgumentError 而无法拖动窗口
+    _user32 = ctypes.WinDLL("user32")
     _user32.SetWindowPos.argtypes = [
         wintypes.HWND,
         wintypes.HWND,

@@ -80,14 +80,41 @@ async function handleCloseToTray() {
   await hideToTray()
   emit('close')
 }
+
+function handleDragPointerDown(e) {
+  if (e.button !== 0) return
+  if (e.target && typeof e.target.closest === 'function' && e.target.closest('button')) {
+    return
+  }
+  try {
+    e.currentTarget?.setPointerCapture?.(e.pointerId)
+  } catch (_err) {
+    // ignore
+  }
+}
+
+function handleDragPointerUp(e) {
+  try {
+    if (e.currentTarget?.hasPointerCapture?.(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+  } catch (_err) {
+    // ignore
+  }
+}
 </script>
 
 <template>
-  <header class="shrink-0 bg-[#141417]/95 backdrop-blur-md border-b border-white/[0.06] z-30">
+  <header
+    class="pywebview-drag-region shrink-0 bg-[#141417]/95 backdrop-blur-md border-b border-white/[0.06] z-30 cursor-move"
+    @pointerdown="handleDragPointerDown"
+    @pointerup="handleDragPointerUp"
+    @pointercancel="handleDragPointerUp"
+  >
     <!-- 第一行：Windows 11 无边框标题栏与窗口控制按钮 -->
     <div class="flex items-center justify-between h-10 px-3.5">
       <!-- 左侧品牌标识与拖拽区域 -->
-      <div class="pywebview-drag-region flex items-center gap-2.5 flex-1 min-w-0 h-full cursor-default">
+      <div class="flex items-center gap-2.5 flex-1 min-w-0 h-full">
         <!-- 四色 Windows 桌面风格几何品牌图标 -->
         <div class="grid grid-cols-2 gap-[2px] w-4 h-4 p-[1px] rounded-[4px] bg-white/[0.04] shrink-0">
           <span class="rounded-[1.5px] bg-[#3B82F6]"></span>
@@ -120,16 +147,18 @@ async function handleCloseToTray() {
       </div>
 
       <!-- 右侧：参考图1“小智桌面”同款窗口控制按钮（置顶图钉、最小化、关闭到托盘） -->
-      <div class="flex items-center gap-1 shrink-0 ml-2">
+      <div class="flex items-center gap-1 shrink-0 ml-2 cursor-default" @mousedown.stop @pointerdown.stop>
         <button
           type="button"
-          class="group relative flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-150 border"
+          class="group relative flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-150 border cursor-pointer"
           :class="
             isPinned
               ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
               : 'bg-transparent text-zinc-400 border-transparent hover:bg-white/[0.07] hover:text-zinc-200'
           "
           :title="isPinned ? '已固定置顶 (点击取消)' : '固定在窗口最前端'"
+          @mousedown.stop
+          @pointerdown.stop
           @click="handleTogglePin"
         >
           <Pin class="w-3.5 h-3.5 transition-transform duration-150" :class="isPinned ? '-rotate-45 fill-emerald-400/25' : ''" />
@@ -137,8 +166,10 @@ async function handleCloseToTray() {
 
         <button
           type="button"
-          class="flex items-center justify-center w-7 h-7 rounded-lg text-zinc-400 hover:bg-white/[0.07] hover:text-zinc-200 transition-colors duration-150"
+          class="flex items-center justify-center w-7 h-7 rounded-lg text-zinc-400 hover:bg-white/[0.07] hover:text-zinc-200 transition-colors duration-150 cursor-pointer"
           title="最小化窗口"
+          @mousedown.stop
+          @pointerdown.stop
           @click="handleMinimize"
         >
           <Minus class="w-3.5 h-3.5" />
@@ -146,8 +177,10 @@ async function handleCloseToTray() {
 
         <button
           type="button"
-          class="flex items-center justify-center w-7 h-7 rounded-lg text-zinc-400 hover:bg-rose-500/20 hover:text-rose-400 transition-colors duration-150"
+          class="flex items-center justify-center w-7 h-7 rounded-lg text-zinc-400 hover:bg-rose-500/20 hover:text-rose-400 transition-colors duration-150 cursor-pointer"
           title="隐藏到系统托盘"
+          @mousedown.stop
+          @pointerdown.stop
           @click="handleCloseToTray"
         >
           <X class="w-3.5 h-3.5" />
@@ -156,18 +189,20 @@ async function handleCloseToTray() {
     </div>
 
     <!-- 第二行：顶部导航胶囊栏 (今日看板 / 应用排行 / 时段流水 / 已屏蔽) -->
-    <div class="px-3.5 pb-2.5 pt-0.5">
-      <nav class="grid grid-cols-4 gap-1 p-1 rounded-xl bg-[#1A1A21] border border-white/[0.06]">
+    <div class="px-3.5 pb-2.5 pt-0.5 cursor-default">
+      <nav class="grid grid-cols-4 gap-1 p-1 rounded-xl bg-[#1A1A21] border border-white/[0.06]" @mousedown.stop @pointerdown.stop>
         <button
           v-for="tab in navTabs"
           :key="tab.key"
           type="button"
-          class="relative flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[12px] font-medium transition-all duration-150"
+          class="relative flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[12px] font-medium transition-all duration-150 cursor-pointer"
           :class="
             currentTab === tab.key
               ? 'bg-[#272732] text-white shadow-sm border border-white/[0.08]'
               : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03] border border-transparent'
           "
+          @mousedown.stop
+          @pointerdown.stop
           @click="selectTab(tab.key)"
         >
           <component

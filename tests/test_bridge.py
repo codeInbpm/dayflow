@@ -158,7 +158,13 @@ def test_bridge_window_controls_and_tray_icon(tmp_path):
 
 
 def test_toggle_always_on_top_uses_async_win32_without_deadlocking_winforms_setter(tmp_path):
-    """回归测试：当存在原生 HWND 或 pywebview.Window(带 gui 属性) 时，绝不能调用 win.on_top setter 导致 WinForms TopMost 跨线程死锁。"""
+    """回归测试：
+    1. 当存在原生 HWND 或 pywebview.Window(带 gui 属性) 时，绝不能调用 win.on_top setter 导致 WinForms TopMost 跨线程死锁；
+    2. 全局 ctypes.windll.user32.SetWindowPos.argtypes 必须保持为 None，确保 pywebview 内置 window.move(x, y) 传 None 时正常拖动窗口。
+    """
+    import ctypes
+
+    assert ctypes.windll.user32.SetWindowPos.argtypes is None
 
     class DeadlockingPyWebViewWindow:
         gui = object()
