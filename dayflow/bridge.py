@@ -4,6 +4,8 @@ import ctypes
 import ctypes.wintypes as wintypes
 import os
 import sys
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -94,6 +96,7 @@ HWND_TOPMOST = -1
 HWND_NOTOPMOST = -2
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 SWP_ASYNCWINDOWPOS = 0x4000
 
@@ -101,6 +104,10 @@ SW_HIDE = 0
 SW_SHOW = 5
 SW_MINIMIZE = 6
 SW_RESTORE = 9
+
+VK_LBUTTON = 0x01
+MIN_WIN_WIDTH = 360
+MIN_WIN_HEIGHT = 500
 
 if os.name == "nt":
     # 使用独立 WinDLL("user32") 实例，避免修改全局 ctypes.windll.user32.SetWindowPos.argtypes
@@ -120,6 +127,12 @@ if os.name == "nt":
     _user32.ShowWindowAsync.restype = wintypes.BOOL
     _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     _user32.SetForegroundWindow.restype = wintypes.BOOL
+    _user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+    _user32.GetCursorPos.restype = wintypes.BOOL
+    _user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    _user32.GetWindowRect.restype = wintypes.BOOL
+    _user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    _user32.GetAsyncKeyState.restype = ctypes.c_short
 else:  # pragma: no cover
     _user32 = None
 
@@ -140,6 +153,7 @@ class DayflowBridge:
         self._on_quit = on_quit
         self._hwnd: int | None = None
         self.always_on_top: bool = False
+        self._resizing: bool = False
 
     def set_window_getter(self, window_getter: Callable[[], Any] | None) -> None:
         """设置或更新 PyWebView 窗口获取函数。"""
@@ -465,3 +479,90 @@ class DayflowBridge:
             except Exception:
                 pass
         return {"ok": True, "quitting": True}
+
+    def start_window_resize(self, edge: str = "se") -> dict:
+        """在无边框窗口边缘/四角按下鼠标时启动原生 120Hz 窗口缩放追踪循环。"""
+        norm_edge = str(edge or "se").strip().lower()
+        valid_edges = {"n", "s", "e", "w", "nw", "ne", "sw", "se"}
+        if norm_edge not in valid_edges:
+            return {"ok": False, "reason": "invalid_edge"}
+
+        win = self._get_window()
+        hwnd = self._resolve_hwnd(win)
+        if not hwnd or _user32 is None:
+            return {"ok": False, "reason": "no_hwnd"}
+
+        if self._resizing:
+            return {"ok": True, "edge": norm_edge}
+
+        pt_start = wintypes.POINT()
+        rect_start = wintypes.RECT()
+        if not _user32.GetCursorPos(ctypes.byref(pt_start)):
+            return {"ok": False}
+        if not _user32.GetWindowRect(hwnd, ctypes.byref(rect_start)):
+            return {"ok": False}
+
+        init_left = int(rect_start.left)
+        init_top = int(rect_start.top)
+        init_right = int(rect_start.right)
+        init_bottom = int(rect_start.bottom)
+        init_w = max(MIN_WIN_WIDTH, init_right - init_left)
+        init_h = max(MIN_WIN_HEIGHT, init_bottom - init_top)
+        start_mx = int(pt_start.x)
+        start_my = int(pt_start.y)
+
+        self._resizing = True
+
+        def _resize_loop() -> None:
+            try:
+                last_rect = (init_left, init_top, init_w, init_h)
+                cur_pt = wintypes.POINT()
+                flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
+                while True:
+                    # 检查鼠标左键是否仍然按住 (最高位 0x8000 表示当前按下)
+                    if (_user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0:
+                        break
+                    if not _user32.GetCursorPos(ctypes.byref(cur_pt)):
+                        break
+
+                    dx = int(cur_pt.x) - start_mx
+                    dy = int(cur_pt.y) - start_my
+
+                    new_x = init_left
+                    new_y = init_top
+                    new_w = init_w
+                    new_h = init_h
+
+                    if "e" in norm_edge:
+                        new_w = max(MIN_WIN_WIDTH, init_w + dx)
+                    elif "w" in norm_edge:
+                        new_w = max(MIN_WIN_WIDTH, init_w - dx)
+                        new_x = init_right - new_w
+
+                    if "s" in norm_edge:
+                        new_h = max(MIN_WIN_HEIGHT, init_h + dy)
+                    elif "n" in norm_edge:
+                        new_h = max(MIN_WIN_HEIGHT, init_h - dy)
+                        new_y = init_bottom - new_h
+
+                    cur_rect = (new_x, new_y, new_w, new_h)
+                    if cur_rect != last_rect:
+                        _user32.SetWindowPos(
+                            hwnd,
+                            0,
+                            new_x,
+                            new_y,
+                            new_w,
+                            new_h,
+                            flags,
+                        )
+                        last_rect = cur_rect
+
+                    time.sleep(0.008)
+            except Exception:
+                pass
+            finally:
+                self._resizing = False
+
+        threading.Thread(target=_resize_loop, daemon=True).start()
+        return {"ok": True, "edge": norm_edge}

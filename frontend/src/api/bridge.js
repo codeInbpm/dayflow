@@ -588,6 +588,18 @@ export async function savePreferences(updates = {}) {
 }
 
 /**
+ * 启动无边框窗口四周/四角拖拽调整大小
+ * @param {'n'|'s'|'e'|'w'|'nw'|'ne'|'sw'|'se'} edge
+ */
+export async function startWindowResize(edge = 'se') {
+  const api = getPyApi()
+  if (api && typeof api.start_window_resize === 'function') {
+    return await api.start_window_resize(edge)
+  }
+  return { ok: true, edge }
+}
+
+/**
  * 将秒数格式化为中文人类可读时长（如 "12小时 28分钟"、"45分钟"、"32秒"）
  */
 export function formatDuration(seconds, { showSecondsWhenUnderMinute = true } = {}) {

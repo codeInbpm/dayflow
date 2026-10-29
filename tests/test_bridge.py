@@ -246,4 +246,10 @@ def test_bridge_preferences_and_version(tmp_path):
     assert updated["theme"] == "light"
     assert updated["font_scale"] == 1.15
     assert updated["version"] == "1.0.0"
+
+    # 验证 start_window_resize 对非法方向与无句柄窗口的安全返回
+    res_invalid = bridge.start_window_resize("invalid")
+    assert res_invalid["ok"] is False
+    res_no_hwnd = bridge.start_window_resize("se")
+    assert res_no_hwnd["ok"] is False
     db.close()

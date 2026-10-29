@@ -237,10 +237,10 @@ function handleAppClick(app) {
       </button>
     </div>
 
-    <!-- 视图模式 1：双列软件图标磁贴视图 (默认，对标参考图2下半部分) -->
+    <!-- 视图模式 1：软件图标磁贴视图 (默认双列，窗口拉宽时自动扩展为3~4列) -->
     <div
       v-if="viewMode === 'grid' && filteredApps.length > 0"
-      class="grid grid-cols-2 gap-2.5"
+      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5"
     >
       <button
         v-for="app in filteredApps"

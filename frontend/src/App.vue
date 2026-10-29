@@ -21,6 +21,7 @@ import {
   fetchIgnoredApps,
   fetchPreferences,
   updateAppSettings,
+  startWindowResize,
   formatDuration,
 } from './api/bridge'
 import { i18n, applyPreferencesToDom } from './i18n'
@@ -160,6 +161,13 @@ function handleAlwaysOnTopSync(val) {
 
 function handleSystemThemeChange() {
   applyPreferencesToDom()
+}
+
+function handleResizeMouseDown(edge, event) {
+  if (event && event.button !== 0) return
+  event?.preventDefault?.()
+  event?.stopPropagation?.()
+  startWindowResize(edge)
 }
 
 onMounted(async () => {
@@ -469,6 +477,53 @@ onUnmounted(() => {
       :always-on-top="Boolean(dashboard.always_on_top)"
       @update:always-on-top="handleAlwaysOnTopSync"
     />
+
+    <!-- 无边框窗口八向拖拽缩放热区（四边 + 四角 + 右下角斜纹缩放手柄） -->
+    <!-- 上边 (n) -->
+    <div
+      class="fixed top-0 left-3 right-3 h-1.5 z-[60] cursor-ns-resize"
+      @mousedown="handleResizeMouseDown('n', $event)"
+    ></div>
+    <!-- 下边 (s) -->
+    <div
+      class="fixed bottom-0 left-3 right-3 h-1.5 z-[60] cursor-ns-resize"
+      @mousedown="handleResizeMouseDown('s', $event)"
+    ></div>
+    <!-- 左边 (w) -->
+    <div
+      class="fixed left-0 top-3 bottom-3 w-1.5 z-[60] cursor-ew-resize"
+      @mousedown="handleResizeMouseDown('w', $event)"
+    ></div>
+    <!-- 右边 (e) -->
+    <div
+      class="fixed right-0 top-3 bottom-3 w-1.5 z-[60] cursor-ew-resize"
+      @mousedown="handleResizeMouseDown('e', $event)"
+    ></div>
+    <!-- 左上角 (nw) -->
+    <div
+      class="fixed top-0 left-0 w-3 h-3 z-[61] cursor-nwse-resize"
+      @mousedown="handleResizeMouseDown('nw', $event)"
+    ></div>
+    <!-- 右上角 (ne) -->
+    <div
+      class="fixed top-0 right-0 w-3 h-3 z-[61] cursor-nesw-resize"
+      @mousedown="handleResizeMouseDown('ne', $event)"
+    ></div>
+    <!-- 左下角 (sw) -->
+    <div
+      class="fixed bottom-0 left-0 w-3 h-3 z-[61] cursor-nesw-resize"
+      @mousedown="handleResizeMouseDown('sw', $event)"
+    ></div>
+    <!-- 右下角 (se) 带精致斜纹角标提示 -->
+    <div
+      class="fixed bottom-0 right-0 w-4 h-4 z-[61] cursor-nwse-resize flex items-end justify-end p-0.5 opacity-40 hover:opacity-90 transition-opacity"
+      title="按住拖动可调整窗口大小"
+      @mousedown="handleResizeMouseDown('se', $event)"
+    >
+      <svg class="w-2.5 h-2.5 text-zinc-400 pointer-events-none" viewBox="0 0 10 10" fill="none">
+        <path d="M9 1L1 9M9 5L5 9M9 8.5L8.5 9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+      </svg>
+    </div>
   </div>
 </template>
 
