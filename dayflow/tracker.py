@@ -14,7 +14,7 @@ from dayflow.window_filter import (
 )
 
 _UNSET = object()
-MAX_TICK_GAP_SEC = 30.0
+MAX_TICK_GAP_SEC = 300.0
 
 
 @dataclass
@@ -194,7 +194,7 @@ class ForegroundTracker:
         with self._lock:
             if self._current is None:
                 return
-            target_now = now or datetime.now()
+            target_now = self._current.last_tick_dt if now is None else now
             end_dt = self._effective_end_dt(target_now)
             self._commit_current_until(end_dt)
 
