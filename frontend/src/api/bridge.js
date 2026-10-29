@@ -28,6 +28,88 @@ function getPyApi() {
   return null
 }
 
+/**
+ * 异步等待 PyWebView 桥接对象注入完成（解决启动首屏瞬间因 bridge 尚未注入而闪现假数据的问题）
+ */
+async function ensurePyApi(maxWaitMs = 2000) {
+  const immediate = getPyApi()
+  if (immediate) return immediate
+  if (typeof window === 'undefined') return null
+
+  return new Promise((resolve) => {
+    let settled = false
+    const start = Date.now()
+
+    const finish = (apiObj) => {
+      if (settled) return
+      settled = true
+      window.removeEventListener('pywebviewready', onReady)
+      clearInterval(timer)
+      resolve(apiObj)
+    }
+
+    const onReady = () => {
+      const apiObj = getPyApi()
+      if (apiObj) finish(apiObj)
+    }
+
+    window.addEventListener('pywebviewready', onReady)
+
+    const timer = setInterval(() => {
+      const apiObj = getPyApi()
+      if (apiObj) {
+        finish(apiObj)
+      } else if (Date.now() - start >= maxWaitMs) {
+        finish(null)
+      }
+    }, 15)
+  })
+}
+
+function isExplicitMockMode() {
+  if (typeof window === 'undefined') return false
+  return window.location?.search?.includes('mock=1')
+}
+
+function buildEmptyDashboard(dateStr = null, period = 'day') {
+  const todayStr = getTodayStr()
+  const targetDate = dateStr || todayStr
+  const hourlyBuckets = Array.from({ length: 24 }, (_, h) => ({
+    hour: h,
+    total_sec: 0,
+    categories: { social: 0, creative: 0, entertainment: 0, productivity: 0, other: 0 },
+  }))
+  return {
+    period,
+    date_str: targetDate,
+    today_str: todayStr,
+    start_date_str: targetDate,
+    end_date_str: targetDate,
+    prev_date_str: null,
+    next_date_str: null,
+    can_go_next: false,
+    period_label: '今日',
+    total_sec: 0,
+    yesterday_total_sec: 0,
+    prev_period_total_sec: 0,
+    daily_avg_sec: 0,
+    active_days_count: 0,
+    hourly_buckets: hourlyBuckets,
+    chart_buckets: hourlyBuckets,
+    category_totals: CATEGORY_ORDER.map((k) => ({
+      category: k,
+      label: CATEGORY_META[k].label,
+      total_sec: 0,
+    })),
+    apps: [],
+    recent_dates: [],
+    category_meta: CATEGORY_META,
+    active_app: null,
+    always_on_top: false,
+    timeline: [],
+  }
+}
+
 export function isDesktopBridgeActive() {
   return Boolean(getPyApi())
 }
@@ -388,11 +470,14 @@ function buildMockDashboard(dateStr) {
  * @param {'day'|'week'|'month'} period
  */
 export async function fetchDashboardData(dateStr = null, period = 'day') {
-  const api = getPyApi()
+  const api = await ensurePyApi(2000)
   if (api && typeof api.get_dashboard_data === 'function') {
     return await api.get_dashboard_data(dateStr, period)
   }
-  return buildMockDashboard(dateStr, period)
+  if (isExplicitMockMode()) {
+    return buildMockDashboard(dateStr, period)
+  }
+  return buildEmptyDashboard(dateStr, period)
 }
 
 /**
@@ -401,7 +486,7 @@ export async function fetchDashboardData(dateStr = null, period = 'day') {
  * @param {string|null} dateStr
  */
 export async function fetchAppDetail(appId, dateStr = null) {
-  const api = getPyApi()
+  const api = await ensurePyApi(1500)
   if (api && typeof api.get_app_detail === 'function') {
     return await api.get_app_detail(Number(appId), dateStr)
   }
@@ -489,9 +574,12 @@ export async function updateAppSettings(appId, payload = {}) {
  * 获取已屏蔽的软件列表
  */
 export async function fetchIgnoredApps() {
-  const api = getPyApi()
+  const api = await ensurePyApi(1500)
   if (api && typeof api.get_ignored_apps === 'function') {
     return await api.get_ignored_apps()
+  }
+  if (!isExplicitMockMode()) {
+    return []
   }
   return mockState.apps
     .filter((a) => a.is_ignored)
@@ -567,7 +655,7 @@ const mockPreferences = {
  * 获取通用偏好设置与版本信息
  */
 export async function fetchPreferences() {
-  const api = getPyApi()
+  const api = await ensurePyApi(1500)
   if (api && typeof api.get_preferences === 'function') {
     return await api.get_preferences()
   }

@@ -214,16 +214,16 @@ def run_desktop_app(db_path: Path, dev_mode: bool = False, dev_url: str = DEV_SE
     tray_ref: dict[str, Any] = {"tray": None}
 
     def quit_app() -> None:
+        # 立即隐藏主窗口，随后落盘关闭数据库并直接终止进程（不等待 1s 轮询线程 sleep 周期，实现毫秒级瞬时关闭）
+        try:
+            bridge.hide_to_tray()
+        except Exception:
+            pass
+
         def _force_terminate() -> None:
-            time.sleep(0.04)
             try:
-                t = tray_ref.get("tray")
-                if t is not None:
-                    t.stop()
-            except Exception:
-                pass
-            try:
-                tracker.stop()
+                tracker._stop_event.set()
+                tracker.flush()
             except Exception:
                 pass
             try:

@@ -467,12 +467,23 @@ class DayflowBridge:
         return {"ok": True, "hidden": False}
 
     def quit_app(self) -> dict:
-        """保存当前正在进行的计时会话并直接退出结束整个程序。"""
+        """立即隐藏窗口、保存当前正在进行的计时会话并直接退出结束整个程序（0延迟关闭）。"""
+        # 1. 第一时间异步隐藏主窗口，让用户点击关闭按钮的瞬间（<5ms）窗口立即从屏幕消失
+        try:
+            win = self._get_window()
+            hwnd = self._resolve_hwnd(win)
+            if hwnd and _user32 is not None:
+                _user32.ShowWindowAsync(hwnd, SW_HIDE)
+        except Exception:
+            pass
+
+        # 2. 将内存中未刷盘的活跃秒数写入 SQLite
         try:
             self.tracker.flush()
         except Exception:
             pass
 
+        # 3. 触发进程立刻终止回调
         if self._on_quit is not None:
             try:
                 self._on_quit()
