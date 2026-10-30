@@ -53,6 +53,7 @@ const detail = ref(null)
 const loading = ref(false)
 const saving = ref(false)
 const hoveredHour = ref(null)
+const pendingCategory = ref(null)
 const t = computed(() => i18n.value)
 const isLight = computed(() => effectiveTheme.value === 'light')
 
@@ -153,12 +154,23 @@ watch(
 )
 
 function closeModal() {
+  pendingCategory.value = null
   emit('update:modelValue', false)
   emit('close')
 }
 
-async function handleSelectCategory(newCat) {
+function handleSelectCategory(newCat) {
   if (!appData.value.id || saving.value || appData.value.category === newCat) return
+  pendingCategory.value = newCat
+}
+
+function cancelCategoryChange() {
+  pendingCategory.value = null
+}
+
+async function confirmCategoryChange() {
+  if (!appData.value.id || saving.value || !pendingCategory.value) return
+  const newCat = pendingCategory.value
   saving.value = true
   try {
     const updated = await updateAppSettings(appData.value.id, { category: newCat })
@@ -169,9 +181,20 @@ async function handleSelectCategory(newCat) {
       }
     }
     emit('updated', updated)
+    pendingCategory.value = null
   } finally {
     saving.value = false
   }
+}
+
+function formatConfirmMsg() {
+  if (!pendingCategory.value) return ''
+  const oldLabel = getCategoryLabel(appData.value.category)
+  const newLabel = getCategoryLabel(pendingCategory.value)
+  return (t.value.confirmChangeCategoryMsg || '是否将「{name}」的所属分类，由“{oldCat}”调整为“{newCat}”？')
+    .replace('{name}', appData.value.display_name)
+    .replace('{oldCat}', oldLabel)
+    .replace('{newCat}', newLabel)
 }
 
 async function handleToggleIgnore() {
@@ -396,10 +419,10 @@ defineExpose({
                 type="button"
                 class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer"
                 :class="
-                  appData.category === cat.key
+                  (pendingCategory ? pendingCategory === cat.key : appData.category === cat.key)
                     ? isLight
-                      ? 'bg-white text-zinc-900 border-blue-500/40 font-semibold shadow-sm'
-                      : 'bg-white/[0.12] text-white border-white/[0.25] shadow-sm'
+                      ? 'bg-white text-zinc-900 border-blue-500/40 font-semibold shadow-sm ring-1 ring-blue-500/30'
+                      : 'bg-white/[0.12] text-white border-white/[0.25] shadow-sm ring-1 ring-white/20'
                     : isLight
                       ? 'bg-white/70 text-zinc-600 border-black/[0.06] hover:bg-white hover:text-zinc-900'
                       : 'bg-white/[0.03] text-zinc-400 border-white/[0.05] hover:bg-white/[0.07] hover:text-zinc-200'
@@ -414,6 +437,54 @@ defineExpose({
                 <span>{{ cat.label }}</span>
               </button>
             </div>
+
+            <!-- 分类变更确认提示条 -->
+            <transition
+              enter-active-class="transition duration-150 ease-out"
+              enter-from-class="opacity-0 -translate-y-1"
+              enter-to-class="opacity-100 translate-y-0"
+              leave-active-class="transition duration-100 ease-in"
+              leave-from-class="opacity-100 translate-y-0"
+              leave-to-class="opacity-0 -translate-y-1"
+            >
+              <div
+                v-if="pendingCategory"
+                class="rounded-xl border p-3 mt-2.5 transition-colors"
+                :class="
+                  isLight
+                    ? 'bg-amber-500/10 border-amber-500/25 text-amber-950'
+                    : 'bg-amber-500/10 border-amber-500/25 text-amber-200'
+                "
+              >
+                <div class="flex items-start gap-2">
+                  <div class="text-[12px] leading-relaxed flex-1">
+                    {{ formatConfirmMsg() }}
+                  </div>
+                </div>
+                <div class="flex items-center justify-end gap-2 mt-2.5 pt-2 border-t border-amber-500/20">
+                  <button
+                    type="button"
+                    class="px-2.5 py-1 rounded-lg text-[11px] font-medium border cursor-pointer transition-colors"
+                    :class="
+                      isLight
+                        ? 'bg-white/80 border-black/10 text-zinc-700 hover:bg-white'
+                        : 'bg-white/10 border-white/10 text-zinc-300 hover:bg-white/15'
+                    "
+                    @click="cancelCategoryChange"
+                  >
+                    {{ t.btnCancel }}
+                  </button>
+                  <button
+                    type="button"
+                    class="px-3 py-1 rounded-lg text-[11px] font-medium bg-emerald-500 text-white hover:bg-emerald-600 shadow cursor-pointer transition-colors"
+                    :disabled="saving"
+                    @click="confirmCategoryChange"
+                  >
+                    {{ saving ? '...' : t.btnConfirmChange }}
+                  </button>
+                </div>
+              </div>
+            </transition>
           </div>
 
           <!-- 3. 具体使用时间段流水列表 (精确回答“哪个时间段使用了该软件”) -->

@@ -226,11 +226,20 @@ async function handlePerformExport() {
   exportDoneTip.value = ''
   try {
     const res = await exportUsageReport(selectedDate.value || '', modalExportPeriod.value)
-    if (res && res.success) {
-      exportDoneTip.value = `${t.value.exportSuccess} (${res.row_count || 0} 行)`
+    if (res && res.cancelled) {
+      exportDoneTip.value = t.value.exportCancelled || '已取消导出'
+      setTimeout(() => {
+        if (exportDoneTip.value === (t.value.exportCancelled || '已取消导出')) {
+          exportDoneTip.value = ''
+        }
+      }, 2000)
+    } else if (res && (res.success || res.ok)) {
+      const tipText = res.filename ? `${t.value.exportSuccess}: ${res.filename}` : `${t.value.exportSuccess}`
+      exportDoneTip.value = tipText
       setTimeout(() => {
         isExportModalOpen.value = false
-      }, 1500)
+        exportDoneTip.value = ''
+      }, 1800)
     } else {
       exportDoneTip.value = t.value.exportFailed
     }
@@ -810,10 +819,17 @@ onUnmounted(() => {
             </span>
           </div>
 
-          <!-- 导出成功或失败提示 -->
+          <!-- 导出成功、取消或失败提示 -->
           <div
             v-if="exportDoneTip"
-            class="text-[11px] text-emerald-400 font-medium text-center pb-2 animate-pulse"
+            class="text-[11px] font-medium text-center pb-2 transition-all"
+            :class="
+              exportDoneTip.includes(t.exportFailed)
+                ? 'text-rose-400'
+                : exportDoneTip.includes(t.exportCancelled)
+                  ? 'text-amber-400'
+                  : 'text-emerald-400 font-semibold'
+            "
           >
             {{ exportDoneTip }}
           </div>

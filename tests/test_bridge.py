@@ -547,3 +547,74 @@ def test_quit_app_confirmation_and_cancellation(tmp_path, monkeypatch):
 
     db.close()
 
+
+def test_export_usage_report_excel_dialog_and_styling(tmp_path):
+    """测试 Excel 导出原生另存为对话框唤起、取消处理、舒展列宽以及马卡龙配色。"""
+    import io
+    from pathlib import Path
+    import openpyxl
+
+    db = UsageDatabase(tmp_path / "test_excel.db")
+    tracker = ForegroundTracker(db)
+    bridge = DayflowBridge(db, tracker)
+
+    # 模拟会话数据
+    win_info = ActiveWindowInfo(
+        100, 5001, "C:/Apps/TikTok.exe", "TikTok.exe", "TikTok 热门短视频", "Chrome_WidgetWin_1"
+    )
+    tracker.tick(datetime(2026, 10, 30, 10, 0, 0), window_info=win_info)
+    tracker.tick(datetime(2026, 10, 30, 10, 15, 0), window_info=win_info)
+
+    # 1. 模拟用户在 Windows 原生另存为对话框中点击了“取消”
+    class MockWindowCancel:
+        def create_file_dialog(self, **kwargs):
+            return None
+
+    bridge.set_window_getter(lambda: MockWindowCancel())
+    cancel_res = bridge.export_usage_report("2026-10-30", "day")
+    assert cancel_res["ok"] is True
+    assert cancel_res["cancelled"] is True
+
+    # 2. 模拟用户在原生对话框中选择了自定义存储路径
+    chosen_excel_path = tmp_path / "MyCustomExport.xlsx"
+
+    class MockWindowChoose:
+        def create_file_dialog(self, **kwargs):
+            return (str(chosen_excel_path),)
+
+    bridge.set_window_getter(lambda: MockWindowChoose())
+    export_res = bridge.export_usage_report("2026-10-30", "day")
+    assert export_res["ok"] is True
+    assert export_res["cancelled"] is False
+    assert Path(export_res["saved_path"]).resolve() == chosen_excel_path.resolve()
+    assert chosen_excel_path.exists()
+    assert chosen_excel_path.stat().st_size > 0
+
+    # 3. 使用 openpyxl 验证生成的 Excel 内部结构：安全自适应列宽与马卡龙彩色填充
+    wb = openpyxl.load_workbook(chosen_excel_path)
+    ws = wb.active
+    assert ws.title == "Dayflow_day"
+
+    # 验证关键列宽已舒展自适应（彻底避免出现 ##### 挤压）
+    assert ws.column_dimensions["A"].width == 15
+    assert ws.column_dimensions["B"].width == 12
+    assert ws.column_dimensions["G"].width == 16
+    assert ws.column_dimensions["K"].width == 40
+
+    # 验证存在彩色胶囊填充单元格
+    found_pill_fill = False
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.fill and cell.fill.start_color and cell.fill.start_color.rgb:
+                color_str = str(cell.fill.start_color.rgb)
+                # 检查是否使用了马卡龙蓝/橙/绿/灰/青等高亮填充（如 00FEF3C7, 00DCEBFE 等）
+                if color_str not in ("00000000", "FFFFFFFF", "00F8FAFC"):
+                    found_pill_fill = True
+                    break
+        if found_pill_fill:
+            break
+    assert found_pill_fill is True
+
+    db.close()
+
+

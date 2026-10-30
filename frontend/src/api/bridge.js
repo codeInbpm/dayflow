@@ -703,7 +703,7 @@ export async function startWindowResize(edge = 'se') {
 }
 
 /**
- * 导出使用时长详细报表为 CSV 文件并自动触发浏览器/WebView本地文件保存
+ * 导出使用时长详细报表为 Excel (.xlsx) 文件，支持唤起 Windows 原生另存为对话框
  * @param {string} dateStr
  * @param {string} period 'day' | 'week' | 'month'
  */
@@ -715,12 +715,24 @@ export async function exportUsageReport(dateStr = '', period = 'day') {
   } else {
     result = {
       ok: true,
-      filename: `Dayflow_${period}_${dateStr || 'today'}.csv`,
-      csv_text: '\ufeff# Dayflow 使用时间明细报表\n日期,开始时间,结束时间,使用时长,一级主分类,二级细分分类,软件名称,进程程序\n',
+      success: true,
+      cancelled: false,
+      filename: `Dayflow_${period}_${dateStr || 'today'}.xlsx`,
+      row_count: 5,
     }
   }
 
-  if (result && result.csv_text && typeof document !== 'undefined') {
+  if (result && result.cancelled) {
+    return {
+      ok: true,
+      success: true,
+      cancelled: true,
+      message: 'cancelled',
+    }
+  }
+
+  // 若处于纯网页开发调试环境且返回了 mock 数据
+  if (result && result.csv_text && !result.saved_path && typeof document !== 'undefined') {
     try {
       const blob = new Blob([result.csv_text], { type: 'text/csv;charset=utf-8;' })
       const link = document.createElement('a')
@@ -730,12 +742,20 @@ export async function exportUsageReport(dateStr = '', period = 'day') {
       link.click()
       document.body.removeChild(link)
       URL.revokeObjectURL(link.href)
-      return { ok: true, filename: result.filename }
     } catch (e) {
       console.error('Failed to trigger download:', e)
     }
   }
-  return result
+
+  return {
+    ok: true,
+    success: true,
+    cancelled: false,
+    filename: result?.filename || `Dayflow_${period}.xlsx`,
+    saved_path: result?.saved_path || '',
+    row_count: result?.row_count || 0,
+    ...result,
+  }
 }
 
 /**

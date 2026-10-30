@@ -106,3 +106,89 @@ def test_resolve_browser_tab_category() -> None:
     assert resolve_browser_tab_category("notepad.exe", "bilibili") is None
     assert resolve_browser_tab_category("chrome.exe", "新标签页") is None
 
+
+def test_pwa_and_local_app_dynamic_detection() -> None:
+    from dayflow.app_meta import inspect_pwa_or_standalone_app
+
+    # 1. 独立窗口 Facebook PWA（无浏览器后缀）
+    is_pwa, name, exe_name, exe_path, cat = inspect_pwa_or_standalone_app(
+        exe_name="msedge.exe",
+        window_title="Facebook - 登录或注册",
+        window_class="Chrome_WidgetWin_1",
+    )
+    assert is_pwa is True
+    assert name == "Facebook"
+    assert exe_name == "Facebook.exe"
+    assert exe_path == "PWA:Facebook"
+    assert cat == "social"
+
+    # 2. 独立窗口 TikTok PWA（无浏览器后缀）
+    is_pwa, name, exe_name, exe_path, cat = inspect_pwa_or_standalone_app(
+        exe_name="chrome.exe",
+        window_title="TikTok - Make Your Day",
+        window_class="Chrome_WidgetWin_1",
+    )
+    assert is_pwa is True
+    assert name == "TikTok"
+    assert exe_name == "TikTok.exe"
+    assert exe_path == "PWA:TikTok"
+    assert cat == "entertainment"
+
+    # 3. 普通浏览器标签页（带浏览器后缀，应放行给浏览器二级分类处理，不当独立应用）
+    is_pwa_tab, _, _, _, _ = inspect_pwa_or_standalone_app(
+        exe_name="chrome.exe",
+        window_title="TikTok - Make Your Day - Google Chrome",
+        window_class="Chrome_WidgetWin_1",
+    )
+    assert is_pwa_tab is False
+
+    is_edge_tab, _, _, _, _ = inspect_pwa_or_standalone_app(
+        exe_name="msedge.exe",
+        window_title="Facebook - 个人 - Microsoft Edge",
+        window_class="Chrome_WidgetWin_1",
+    )
+    assert is_edge_tab is False
+
+    # 4. 本地独立软件的动态 1 级分类
+    assert classify_app("HBuilderX.exe", "HBuilderX") == "creative"
+    assert classify_app("xterminal.exe", "XTerminal") == "creative"
+    assert classify_app("Grok Bot.exe", "Grok Bot") == "creative"
+    assert classify_app("WorkBuddy.exe", "WorkBuddy") == "productivity"
+
+
+def test_official_brand_icons_and_database_healing(tmp_path):
+    from dayflow.app_meta import get_official_brand_icon_base64
+    from dayflow.database import UsageDatabase
+
+    # 1. 验证 TikTok 与 Facebook 拥有官方高清矢量 Logo
+    tiktok_icon = get_official_brand_icon_base64("TikTok")
+    assert tiktok_icon is not None
+    assert tiktok_icon.startswith("data:image/svg+xml;base64,")
+
+    fb_icon = get_official_brand_icon_base64("Facebook")
+    assert fb_icon is not None
+    assert fb_icon.startswith("data:image/svg+xml;base64,")
+
+    # 2. 验证元数据解析优先使用官方真实 Logo 而非普通图标
+    meta_tiktok = resolve_app_metadata("PWA:TikTok", "TikTok.exe", override_display_name="TikTok")
+    assert meta_tiktok["icon_base64"] == tiktok_icon
+
+    meta_fb = resolve_app_metadata("PWA:Facebook", "Facebook.exe", override_display_name="Facebook")
+    assert meta_fb["icon_base64"] == fb_icon
+
+    # 3. 验证数据库旧数据自愈：之前存入 Edge 图标的记录，启动时自动更新为官方真实 Logo！
+    db = UsageDatabase(tmp_path / "heal_test.db")
+    fake_edge_icon = "data:image/png;base64,FAKE_EDGE_ICON"
+    db.upsert_app("PWA:TikTok", "TikTok.exe", "TikTok", "entertainment", fake_edge_icon)
+    db.upsert_app("PWA:Facebook", "Facebook.exe", "Facebook", "social", fake_edge_icon)
+
+    healed = db.heal_brand_icons()
+    assert healed == 2
+
+    with db._lock, db._conn:
+        row_tk = db._conn.execute("SELECT icon_base64 FROM apps WHERE display_name = 'TikTok'").fetchone()
+        assert row_tk["icon_base64"] == tiktok_icon
+
+        row_fb = db._conn.execute("SELECT icon_base64 FROM apps WHERE display_name = 'Facebook'").fetchone()
+        assert row_fb["icon_base64"] == fb_icon
+

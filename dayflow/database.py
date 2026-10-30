@@ -51,6 +51,7 @@ class UsageDatabase:
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
+        self.heal_brand_icons()
 
     def _init_schema(self) -> None:
         with self._lock, self._conn:
@@ -118,12 +119,19 @@ class UsageDatabase:
         norm_category = category if category in CATEGORIES else "other"
         with self._lock, self._conn:
             row = self._conn.execute(
-                "SELECT id, icon_base64 FROM apps WHERE exe_path = ?",
+                "SELECT id, icon_base64, display_name FROM apps WHERE exe_path = ?",
                 (exe_path,),
             ).fetchone()
             if row is not None:
                 app_id = int(row["id"])
+                # 当旧图标为空，或者传入了全新的官方矢量高清图标且旧图标非官方矢量时，自动更新图标
+                should_update_icon = False
                 if not row["icon_base64"] and icon_base64:
+                    should_update_icon = True
+                elif icon_base64 and icon_base64.startswith("data:image/svg+xml") and not str(row["icon_base64"]).startswith("data:image/svg+xml"):
+                    should_update_icon = True
+
+                if should_update_icon:
                     self._conn.execute(
                         "UPDATE apps SET icon_base64 = ? WHERE id = ?",
                         (icon_base64, app_id),
@@ -138,6 +146,30 @@ class UsageDatabase:
                 (exe_path, exe_name, display_name or exe_name, norm_category, icon_base64 or ""),
             )
             return int(cur.lastrowid)
+
+    def heal_brand_icons(self) -> int:
+        """检查并自愈已知知名品牌应用（如 TikTok, Facebook）被错误保存的旧图标。"""
+        try:
+            from dayflow.app_meta import get_official_brand_icon_base64
+        except ImportError:
+            return 0
+
+        healed_count = 0
+        with self._lock, self._conn:
+            rows = self._conn.execute(
+                "SELECT id, display_name, exe_name, icon_base64 FROM apps"
+            ).fetchall()
+            for r in rows:
+                app_id = int(r["id"])
+                disp = str(r["display_name"] or "")
+                official = get_official_brand_icon_base64(disp) or get_official_brand_icon_base64(str(r["exe_name"] or ""))
+                if official and r["icon_base64"] != official:
+                    self._conn.execute(
+                        "UPDATE apps SET icon_base64 = ? WHERE id = ?",
+                        (official, app_id),
+                    )
+                    healed_count += 1
+        return healed_count
 
     def record_usage_span(
         self,
@@ -1260,3 +1292,304 @@ class UsageDatabase:
             )
 
         return output.getvalue()
+
+    def export_usage_excel_bytes(
+        self, date_str: str | None = None, period: str = "day"
+    ) -> bytes:
+        """导出高度美观、自适应列宽且包含分类彩色背景标签的专业 Excel 工作簿 (.xlsx)。"""
+        try:
+            import openpyxl
+            from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+            from openpyxl.utils import get_column_letter
+        except ImportError:
+            # 优雅回退
+            return self.export_usage_csv_text(date_str, period=period).encode("utf-8-sig")
+
+        import io
+
+        target_date = date_str or datetime.now().strftime("%Y-%m-%d")
+
+        if period == "week":
+            base_dt = datetime.strptime(target_date, "%Y-%m-%d")
+            start_dt = base_dt - timedelta(days=base_dt.weekday())
+            end_dt = start_dt + timedelta(days=6)
+            start_str = start_dt.strftime("%Y-%m-%d")
+            end_str = end_dt.strftime("%Y-%m-%d")
+            period_label = f"周报 ({start_str} ~ {end_str})"
+        elif period == "month":
+            parts = [int(p) for p in target_date.split("-")]
+            y, m = parts[0], parts[1]
+            last_day = calendar.monthrange(y, m)[1]
+            start_str = f"{y:04d}-{m:02d}-01"
+            end_str = f"{y:04d}-{m:02d}-{last_day:02d}"
+            period_label = f"月报 ({y}年{m}月)"
+        else:
+            start_str = target_date
+            end_str = target_date
+            period_label = f"日报 ({target_date})"
+
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT 
+                    s.date_str,
+                    s.start_time,
+                    s.end_time,
+                    s.duration_sec,
+                    s.hour_bucket,
+                    s.last_window_title,
+                    a.display_name,
+                    a.exe_name,
+                    a.category AS base_category,
+                    COALESCE(s.category, a.category) AS session_category
+                FROM usage_sessions s
+                JOIN apps a ON a.id = s.app_id
+                WHERE s.date_str BETWEEN ? AND ? AND a.is_ignored = 0
+                ORDER BY s.date_str ASC, s.hour_bucket ASC, s.start_time ASC, s.id ASC
+                """,
+                (start_str, end_str),
+            ).fetchall()
+
+            cat_rows = self._conn.execute(
+                """
+                SELECT COALESCE(s.category, a.category) AS category, COALESCE(SUM(s.duration_sec), 0) AS sec
+                FROM usage_sessions s
+                JOIN apps a ON a.id = s.app_id
+                WHERE s.date_str BETWEEN ? AND ? AND a.is_ignored = 0
+                GROUP BY COALESCE(s.category, a.category)
+                """,
+                (start_str, end_str),
+            ).fetchall()
+
+        total_sec = sum(int(r["duration_sec"]) for r in rows)
+
+        def _fmt_dur(sec: int) -> str:
+            h = sec // 3600
+            m = (sec % 3600) // 60
+            s = sec % 60
+            if h > 0:
+                return f"{h}小时{m}分{s}秒"
+            if m > 0:
+                return f"{m}分{s}秒"
+            return f"{s}秒"
+
+        def _resolve_sub_cat(exe_name: str, window_title: str, pri_cat: str) -> str:
+            low_t = (window_title or "").lower()
+            low_e = (exe_name or "").lower()
+            if any(k in low_t for k in ("bilibili", "哔哩哔哩", "b站")):
+                return "B站视频播放 (影音娱乐)"
+            if any(k in low_t for k in ("youtube", "youtu.be")):
+                return "YouTube 视频流媒体 (影音娱乐)"
+            if any(k in low_t for k in ("网易云音乐", "cloudmusic", "qq音乐", "kugou")):
+                return "在线音乐与电台 (影音娱乐)"
+            if any(k in low_t for k in ("爱奇艺", "iqiyi", "腾讯视频", "优酷", "youku", "netflix", "twitch")):
+                return "影视长视频 (影音娱乐)"
+            if any(k in low_e for k in ("lol", "league", "genshin", "steam", "epic", "dota", "valorant", "game")):
+                return "电脑游戏客户端 (影音娱乐)"
+            if any(k in low_t for k in ("github", "gitlab", "gitee")):
+                return "代码托管与PR协作 (开发创意)"
+            if any(k in low_t for k in ("chatgpt", "claude", "deepseek", "kimi", "openai")):
+                return "AI大模型对话助手 (开发创意)"
+            if any(k in low_t for k in ("stackoverflow", "v2ex", "leetcode", "掘金", "segmentfault")):
+                return "技术社区与题库 (开发创意)"
+            if any(k in low_t for k in ("figma", "mastergo", "pixso", "canva", "dribbble")):
+                return "UI与创意设计 (开发创意)"
+            if any(k in low_e for k in ("code.exe", "idea64.exe", "pycharm", "cursor.exe", "visualstudio", "devenv.exe")):
+                return "IDE集成开发工具 (开发创意)"
+            if any(k in low_t for k in ("飞书", "feishu", "lark")):
+                return "飞书协同办公 (办公效率)"
+            if any(k in low_t for k in ("语雀", "yuque", "notion", "wolai", "obsidian", "flowus")):
+                return "团队与个人知识库 (办公效率)"
+            if any(k in low_t for k in ("google docs", "google sheets", "腾讯文档", "金山文档", "kdocs", "office", "excel", "word")):
+                return "在线协同文档 (办公效率)"
+            if any(k in low_e for k in ("wps.exe", "word.exe", "excel.exe", "powerpnt.exe")):
+                return "桌面办公套件 (办公效率)"
+            if any(k in low_t for k in ("微博", "weibo")):
+                return "微博热搜动态 (社交通讯)"
+            if any(k in low_t for k in ("知乎", "zhihu")):
+                return "知乎问答专栏 (社交通讯)"
+            if any(k in low_t for k in ("twitter", "x.com", "reddit")):
+                return "海外社交平台 (社交通讯)"
+            if any(k in low_e for k in ("wechat.exe", "qq.exe", "dingtalk.exe", "telegram", "discord")):
+                return "即时通讯聊天 (社交通讯)"
+
+            fallback_labels = {
+                "social": "社交通讯软件",
+                "creative": "开发与设计工具",
+                "entertainment": "影音娱乐通用",
+                "productivity": "办公效率工具",
+                "other": "日常工具与系统",
+            }
+            return fallback_labels.get(pri_cat, "通用软件分类")
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = f"Dayflow_{period}"
+        ws.views.sheetView[0].showGridLines = True
+
+        # 配色与样式系统（参考图 2）
+        CATEGORY_PILL_STYLES = {
+            "social": {
+                "fill": PatternFill(start_color="DCEBFE", end_color="DCEBFE", fill_type="solid"),
+                "font": Font(name="Microsoft YaHei", size=10, bold=True, color="1E40AF"),
+            },
+            "creative": {
+                "fill": PatternFill(start_color="CFFAFE", end_color="CFFAFE", fill_type="solid"),
+                "font": Font(name="Microsoft YaHei", size=10, bold=True, color="0E7490"),
+            },
+            "entertainment": {
+                "fill": PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid"),
+                "font": Font(name="Microsoft YaHei", size=10, bold=True, color="92400E"),
+            },
+            "productivity": {
+                "fill": PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid"),
+                "font": Font(name="Microsoft YaHei", size=10, bold=True, color="065F46"),
+            },
+            "other": {
+                "fill": PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid"),
+                "font": Font(name="Microsoft YaHei", size=10, bold=True, color="475569"),
+            },
+        }
+
+        thin_side = Side(border_style="thin", color="E2E8F0")
+        thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+        header_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+        header_font = Font(name="Microsoft YaHei", size=10, bold=True, color="0F172A")
+        body_font = Font(name="Microsoft YaHei", size=10, color="1E293B")
+        title_font = Font(name="Microsoft YaHei", size=13, bold=True, color="0F172A")
+        sub_title_font = Font(name="Microsoft YaHei", size=11, bold=True, color="1E293B")
+        meta_label_font = Font(name="Microsoft YaHei", size=10, bold=True, color="64748B")
+
+        # 1. 顶部报表概要信息
+        ws["A1"] = "Dayflow 桌面屏幕使用时间明细报表"
+        ws["A1"].font = title_font
+
+        metadata_rows = [
+            ("统计周期", period_label),
+            ("导出时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            ("累计时长", f"{_fmt_dur(total_sec)} ({total_sec} 秒)"),
+            ("会话总数", f"{len(rows)} 条"),
+        ]
+        curr_row = 3
+        for label, val in metadata_rows:
+            ws.cell(row=curr_row, column=1, value=label).font = meta_label_font
+            ws.cell(row=curr_row, column=2, value=val).font = body_font
+            curr_row += 1
+
+        curr_row += 1
+        # 2. 一级分类时长汇总
+        ws.cell(row=curr_row, column=1, value="【一级分类时长汇总】").font = sub_title_font
+        curr_row += 1
+
+        cat_headers = ["分类代码", "一级分类名称", "累计时长", "时长(秒)", "占比"]
+        for c_idx, h in enumerate(cat_headers, start=1):
+            cell = ws.cell(row=curr_row, column=c_idx, value=h)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="center" if c_idx != 2 else "left", vertical="center")
+        curr_row += 1
+
+        for cr in cat_rows:
+            c_key = str(cr["category"])
+            c_sec = int(cr["sec"])
+            c_lbl = CATEGORY_LABELS.get(c_key, c_key)
+            ratio = (c_sec / total_sec * 100) if total_sec > 0 else 0
+            style = CATEGORY_PILL_STYLES.get(c_key, CATEGORY_PILL_STYLES["other"])
+
+            row_vals = [c_key, c_lbl, _fmt_dur(c_sec), c_sec, f"{ratio:.1f}%"]
+            for c_idx, val in enumerate(row_vals, start=1):
+                cell = ws.cell(row=curr_row, column=c_idx, value=val)
+                cell.border = thin_border
+                cell.alignment = Alignment(horizontal="center" if c_idx in (1, 3, 5) else "right" if c_idx == 4 else "left", vertical="center")
+                if c_idx == 2:
+                    cell.fill = style["fill"]
+                    cell.font = style["font"]
+                else:
+                    cell.font = body_font
+            curr_row += 1
+
+        curr_row += 1
+        # 3. 时段使用会话流水明细表
+        ws.cell(row=curr_row, column=1, value="【时段使用会话流水明细表】").font = sub_title_font
+        curr_row += 1
+
+        flow_headers = [
+            "日期",
+            "开始时间",
+            "结束时间",
+            "小时时段",
+            "使用时长",
+            "时长(秒)",
+            "一级主分类",
+            "详细二级分类",
+            "软件名称",
+            "进程程序",
+            "窗口/网页标题",
+        ]
+        for c_idx, h in enumerate(flow_headers, start=1):
+            cell = ws.cell(row=curr_row, column=c_idx, value=h)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        curr_row += 1
+
+        for r in rows:
+            pri_key = str(r["session_category"] or "other")
+            pri_label = CATEGORY_LABELS.get(pri_key, "其他工具")
+            exe = str(r["exe_name"] or "")
+            title = str(r["last_window_title"] or "")
+            sec = int(r["duration_sec"])
+            sub_label = _resolve_sub_cat(exe, title, pri_key)
+            style = CATEGORY_PILL_STYLES.get(pri_key, CATEGORY_PILL_STYLES["other"])
+
+            row_data = [
+                str(r["date_str"]),
+                str(r["start_time"]),
+                str(r["end_time"]),
+                f"{r['hour_bucket']:02d}:00",
+                _fmt_dur(sec),
+                sec,
+                pri_label,
+                sub_label,
+                str(r["display_name"]),
+                exe,
+                title,
+            ]
+            for c_idx, val in enumerate(row_data, start=1):
+                cell = ws.cell(row=curr_row, column=c_idx, value=val)
+                cell.border = thin_border
+                cell.font = body_font
+                if c_idx in (1, 2, 3, 4, 5):
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                elif c_idx == 6:
+                    cell.alignment = Alignment(horizontal="right", vertical="center")
+                elif c_idx in (7, 8):
+                    cell.fill = style["fill"]
+                    cell.font = style["font"]
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                else:
+                    cell.alignment = Alignment(horizontal="left", vertical="center")
+            curr_row += 1
+
+        # 4. 关键：自适应安全列宽设置（确保用户双击打开时绝不会缩成一团变成 #####）
+        column_widths = {
+            "A": 15,  # 日期 2026-10-30
+            "B": 12,  # 开始时间
+            "C": 12,  # 结束时间
+            "D": 12,  # 小时时段
+            "E": 14,  # 使用时长
+            "F": 12,  # 时长(秒)
+            "G": 16,  # 一级主分类
+            "H": 22,  # 详细二级分类
+            "I": 20,  # 软件名称
+            "J": 18,  # 进程程序
+            "K": 40,  # 窗口/网页标题
+        }
+        for col_letter, width in column_widths.items():
+            ws.column_dimensions[col_letter].width = width
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()

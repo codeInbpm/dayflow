@@ -181,3 +181,45 @@ def test_tracker_game_dnd_and_system_notification_callback(tmp_path):
     assert len(remind_callbacks) == 1
     assert remind_callbacks[0] >= 16.0
     assert tracker._health_remind_pending is True
+
+
+def test_tracker_registers_pwa_as_standalone_app(tmp_path):
+    db = UsageDatabase(tmp_path / "tracker_pwa.db")
+    tracker = ForegroundTracker(db, flush_interval=60.0)
+
+    # 1. 模拟打开桌面 Facebook 本地应用（Edge 托管，标题 Facebook，无 Edge 后缀）
+    fb_pwa = ActiveWindowInfo(
+        101,
+        5001,
+        "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+        "msedge.exe",
+        "Facebook - 登录或注册",
+        "Chrome_WidgetWin_1",
+    )
+    # 2. 模拟打开任务栏 TikTok 本地应用（Chrome 托管，标题 TikTok）
+    tiktok_pwa = ActiveWindowInfo(
+        102,
+        5002,
+        "C:/Program Files/Google/Chrome/Application/chrome.exe",
+        "chrome.exe",
+        "TikTok - Make Your Day",
+        "Chrome_WidgetWin_1",
+    )
+
+    tracker.tick(datetime(2026, 10, 30, 9, 0, 0), window_info=fb_pwa)
+    tracker.tick(datetime(2026, 10, 30, 9, 0, 30), window_info=fb_pwa)
+    tracker.tick(datetime(2026, 10, 30, 9, 0, 30), window_info=tiktok_pwa)
+    tracker.tick(datetime(2026, 10, 30, 9, 1, 0), window_info=tiktok_pwa)
+    tracker.flush(datetime(2026, 10, 30, 9, 1, 0))
+
+    summary = db.get_daily_summary("2026-10-30")
+    apps_by_name = {a["display_name"]: a for a in summary["apps"]}
+
+    # 验证作为独立本地应用被记录，而不是被吃进 Edge 或 Chrome！
+    assert "Facebook" in apps_by_name
+    assert apps_by_name["Facebook"]["category"] == "social"
+    assert apps_by_name["Facebook"]["total_sec"] == 30
+
+    assert "TikTok" in apps_by_name
+    assert apps_by_name["TikTok"]["category"] == "entertainment"
+    assert apps_by_name["TikTok"]["total_sec"] == 30

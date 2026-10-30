@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import {
   ChevronLeft,
   ChevronRight,
@@ -9,8 +9,10 @@ import {
   FilterX,
   RotateCcw,
   Download,
+  Calendar,
 } from 'lucide-vue-next'
 import HourlyBarChart from './HourlyBarChart.vue'
+import DatePickerModal from './DatePickerModal.vue'
 import { CATEGORY_META, formatDuration } from '../api/bridge'
 import {
   i18n,
@@ -89,6 +91,7 @@ const emit = defineEmits([
 
 const t = computed(() => i18n.value)
 const isLight = computed(() => effectiveTheme.value === 'light')
+const isDatePickerOpen = ref(false)
 
 const PERIOD_TABS = computed(() => [
   { key: 'day', label: t.value.periodDay },
@@ -402,9 +405,16 @@ function handleCategoryClick(catKey) {
           <ChevronLeft class="w-3.5 h-3.5" />
         </button>
 
-        <span class="px-2 text-[12px] font-medium text-zinc-200 tracking-wide">
-          {{ formattedDateBanner }}
-        </span>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[12px] font-medium tracking-wide transition-colors cursor-pointer group"
+          :class="isLight ? 'text-zinc-800 hover:bg-zinc-200/70 hover:text-blue-600' : 'text-zinc-200 hover:bg-white/[0.08] hover:text-white'"
+          title="点击打开日历选择器"
+          @click="isDatePickerOpen = true"
+        >
+          <Calendar class="w-3.5 h-3.5 text-zinc-400 group-hover:text-blue-400 transition-colors" />
+          <span>{{ formattedDateBanner }}</span>
+        </button>
 
         <button
           type="button"
@@ -604,5 +614,13 @@ function handleCategoryClick(catKey) {
         </span>
       </button>
     </div>
+
+    <!-- 专属日期日历选择器弹窗 -->
+    <DatePickerModal
+      v-model="isDatePickerOpen"
+      :current-date="resolvedDateStr"
+      :today-str="resolvedTodayStr"
+      @select="selectDate"
+    />
   </section>
 </template>

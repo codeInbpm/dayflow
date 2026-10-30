@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable
 
-from dayflow.app_meta import resolve_app_metadata, resolve_browser_tab_category
+from dayflow.app_meta import (
+    inspect_pwa_or_standalone_app,
+    resolve_app_metadata,
+    resolve_browser_tab_category,
+)
 from dayflow.database import UsageDatabase
 from dayflow.window_filter import (
     ActiveWindowInfo,
@@ -109,14 +113,39 @@ class ForegroundTracker:
         self._thread: threading.Thread | None = None
 
     def _resolve_and_register_app(self, info: ActiveWindowInfo) -> dict:
-        norm_key = (info.exe_path or info.exe_name).strip().lower()
+        is_pwa, pwa_name, pwa_exe, pwa_path, pwa_cat = inspect_pwa_or_standalone_app(
+            exe_name=info.exe_name,
+            window_title=info.window_title,
+            window_class=info.window_class,
+            pid=info.pid,
+        )
+        if is_pwa:
+            target_path = pwa_path
+            target_name = pwa_exe
+            override_name = pwa_name
+            override_cat = pwa_cat
+            norm_key = pwa_path.lower()
+        else:
+            target_path = info.exe_path or info.exe_name
+            target_name = info.exe_name
+            override_name = None
+            override_cat = None
+            norm_key = (info.exe_path or info.exe_name).strip().lower()
+
         cached = self._app_cache.get(norm_key)
         if cached is not None:
             return cached
 
-        meta = resolve_app_metadata(info.exe_path, info.exe_name)
-        exe_path = info.exe_path or meta["exe_path"]
-        exe_name = info.exe_name or meta["exe_name"]
+        meta = resolve_app_metadata(
+            exe_path=target_path,
+            exe_name=target_name,
+            window_title=info.window_title,
+            hwnd=info.hwnd,
+            override_display_name=override_name,
+            override_category=override_cat,
+        )
+        exe_path = target_path or meta["exe_path"]
+        exe_name = target_name or meta["exe_name"]
         app_id = self.db.upsert_app(
             exe_path=exe_path,
             exe_name=exe_name,

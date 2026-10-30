@@ -255,6 +255,22 @@ BUILTIN_APP_CATALOG: dict[str, tuple[str, str]] = {
     "cs2.exe": ("Counter-Strike 2", "entertainment"),
     "dota2.exe": ("Dota 2", "entertainment"),
     "b2.exe": ("黑神话：悟空", "entertainment"),
+    "tiktok.exe": ("TikTok", "entertainment"),
+    "facebook.exe": ("Facebook", "social"),
+    "instagram.exe": ("Instagram", "social"),
+    "twitter.exe": ("Twitter", "social"),
+    "x.exe": ("X", "social"),
+    "threads.exe": ("Threads", "social"),
+    "whatsapp.exe": ("WhatsApp", "social"),
+    "hbuilder.exe": ("HBuilderX", "creative"),
+    "hbuilderx.exe": ("HBuilderX", "creative"),
+    "xterminal.exe": ("XTerminal", "creative"),
+    "grok.exe": ("Grok", "creative"),
+    "grok bot.exe": ("Grok Bot", "creative"),
+    "workbuddy.exe": ("WorkBuddy", "productivity"),
+    "sakurafrp.exe": ("SakuraFrp 启动器", "productivity"),
+    "cc switch.exe": ("CC Switch", "productivity"),
+    "ccswitch.exe": ("CC Switch", "productivity"),
 }
 
 _CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
@@ -280,6 +296,26 @@ _CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
             "zoom",
             "旺旺",
             "千牛",
+            "facebook",
+            "messenger",
+            "instagram",
+            "threads",
+            "whatsapp",
+            "twitter",
+            "x - ",
+            "微博",
+            "weibo",
+            "贴吧",
+            "tieba",
+            "知乎",
+            "zhihu",
+            "豆瓣",
+            "douban",
+            "line",
+            "signal",
+            "skype",
+            "yy",
+            "kook",
         ),
     ),
     (
@@ -287,14 +323,43 @@ _CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
         (
             "visual studio",
             "vscode",
+            "code.exe",
             "cursor",
             "windsurf",
+            "trae",
+            "antigravity",
             "intellij",
+            "idea",
             "pycharm",
             "webstorm",
             "goland",
             "clion",
+            "rider",
+            "datagrip",
             "android studio",
+            "hbuilder",
+            "xterminal",
+            "terminal",
+            "powershell",
+            "pwsh",
+            "cmd",
+            "git",
+            "github",
+            "gitlab",
+            "gitee",
+            "postman",
+            "apifox",
+            "navicat",
+            "dbeaver",
+            "sqlyog",
+            "docker",
+            "grok",
+            "chatgpt",
+            "openai",
+            "claude",
+            "gemini",
+            "deepseek",
+            "copilot",
             "photoshop",
             "illustrator",
             "premiere",
@@ -304,40 +369,41 @@ _CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
             "autocad",
             "剪映",
             "capcut",
-            "terminal",
-            "powershell",
-            "git",
-            "postman",
-            "apifox",
-            "navicat",
-            "dbeaver",
-            "docker",
+            "devtools",
         ),
     ),
     (
         "entertainment",
         (
+            "tiktok",
             "抖音",
             "douyin",
             "红果短剧",
             "hongguo",
             "哔哩哔哩",
             "bilibili",
+            "youtube",
+            "netflix",
+            "twitch",
             "网易云音乐",
             "cloudmusic",
             "qq音乐",
             "qqmusic",
             "酷狗",
             "kugou",
+            "酷我",
             "汽水音乐",
+            "spotify",
             "potplayer",
             "vlc",
+            "mpv",
             "爱奇艺",
             "iqiyi",
             "腾讯视频",
             "qqlive",
             "优酷",
             "youku",
+            "芒果tv",
             "steam",
             "epic games",
             "wegame",
@@ -345,10 +411,18 @@ _CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
             "genshin",
             "英雄联盟",
             "league of legends",
-            "spotify",
             "music",
             "player",
             "game",
+            "dota",
+            "cs2",
+            "valorant",
+            "黑神话",
+            "acfun",
+            "快手",
+            "kuaishou",
+            "小红书",
+            "xiaohongshu",
         ),
     ),
     (
@@ -359,6 +433,7 @@ _CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
             "firefox",
             "brave",
             "arc",
+            "opera",
             "wps",
             "word",
             "excel",
@@ -372,6 +447,10 @@ _CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
             "有道云笔记",
             "百度网盘",
             "阿里云盘",
+            "quark",
+            "夸克",
+            "迅雷",
+            "thunder",
             "文件资源管理器",
             "explorer",
             "notepad",
@@ -381,12 +460,88 @@ _CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
             "everything",
             "utools",
             "snipaste",
+            "pixpin",
+            "workbuddy",
+            "switch",
+            "frp",
+            "vpn",
+            "v2ray",
+            "clash",
+            "nekoray",
         ),
     ),
 ]
 
 _ICON_CACHE: dict[str, str] = {}
 _META_CACHE: dict[str, dict] = {}
+
+# 核心知名独立 Web / 桌面应用官方原版品牌矢量图标库
+OFFICIAL_BRAND_SVG_ICONS: dict[str, str] = {
+    "tiktok": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">'
+        '<rect width="48" height="48" rx="10" fill="#010101"/>'
+        '<path fill="#25F4EE" d="M29.5 10c1.2 2.8 3.5 4.8 6.5 5.2v4.8c-2.4 0-4.6-.8-6.5-2.2v11.7c0 5.8-4.7 10.5-10.5 10.5S8.5 35.3 8.5 29.5c0-5.4 4.1-9.9 9.4-10.4v5.1c-2.6.4-4.5 2.6-4.5 5.3 0 3 2.4 5.4 5.4 5.4s5.4-2.4 5.4-5.4V10h5.2z" opacity="0.95"/>'
+        '<path fill="#FE2C55" d="M30.5 11c1.2 2.8 3.5 4.8 6.5 5.2v4.8c-2.4 0-4.6-.8-6.5-2.2v11.7c0 5.8-4.7 10.5-10.5 10.5S9.5 36.3 9.5 30.5c0-5.4 4.1-9.9 9.4-10.4v5.1c-2.6.4-4.5 2.6-4.5 5.3 0 3 2.4 5.4 5.4 5.4s5.4-2.4 5.4-5.4V11h5.2z" opacity="0.95"/>'
+        '<path fill="#FFFFFF" d="M30 10.5c1.2 2.8 3.5 4.8 6.5 5.2v4.8c-2.4 0-4.6-.8-6.5-2.2v11.7c0 5.8-4.7 10.5-10.5 10.5S9 35.8 9 30c0-5.4 4.1-9.9 9.4-10.4v5.1c-2.6.4-4.5 2.6-4.5 5.3 0 3 2.4 5.4 5.4 5.4s5.4-2.4 5.4-5.4V10.5H30z"/>'
+        '</svg>'
+    ),
+    "facebook": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">'
+        '<rect width="48" height="48" rx="10" fill="#1877F2"/>'
+        '<path fill="#FFFFFF" d="M31.2 26.5l.9-6.1h-5.8v-4c0-1.7.8-3.3 3.4-3.3h2.6V7.9s-2.4-.4-4.7-.4c-4.8 0-8 2.9-8 8.2v4.7h-5.4v6.1h5.4V41c1.1.2 2.2.3 3.3.3 1.1 0 2.2-.1 3.3-.3V26.5h4.7z"/>'
+        '</svg>'
+    ),
+    "youtube": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">'
+        '<rect width="48" height="48" rx="10" fill="#FF0000"/>'
+        '<path fill="#FFFFFF" d="M20 16l12 8-12 8V16z"/>'
+        '</svg>'
+    ),
+    "twitter": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">'
+        '<rect width="48" height="48" rx="10" fill="#000000"/>'
+        '<path fill="#FFFFFF" d="M28.4 12h3.4l-7.4 8.5 8.7 11.5h-6.8l-5.3-7-6.1 7H11.5l7.9-9.1L11 12h7l4.8 6.4L28.4 12zm-1.2 18h1.9L17.2 13.9h-2L27.2 30z"/>'
+        '</svg>'
+    ),
+    "x": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">'
+        '<rect width="48" height="48" rx="10" fill="#000000"/>'
+        '<path fill="#FFFFFF" d="M28.4 12h3.4l-7.4 8.5 8.7 11.5h-6.8l-5.3-7-6.1 7H11.5l7.9-9.1L11 12h7l4.8 6.4L28.4 12zm-1.2 18h1.9L17.2 13.9h-2L27.2 30z"/>'
+        '</svg>'
+    ),
+    "instagram": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">'
+        '<defs><radialGradient id="ig" cx="20%" cy="100%" r="120%"><stop offset="0%" stop-color="#FFDD55"/><stop offset="25%" stop-color="#FF5D3B"/><stop offset="50%" stop-color="#FF0069"/><stop offset="75%" stop-color="#D300C5"/><stop offset="100%" stop-color="#7638FA"/></radialGradient></defs>'
+        '<rect width="48" height="48" rx="10" fill="url(#ig)"/>'
+        '<path fill="none" stroke="#FFFFFF" stroke-width="3" d="M16 11h16a5 5 0 0 1 5 5v16a5 5 0 0 1-5 5H16a5 5 0 0 1-5-5V16a5 5 0 0 1 5-5z"/>'
+        '<circle cx="24" cy="24" r="6" fill="none" stroke="#FFFFFF" stroke-width="3"/>'
+        '<circle cx="32" cy="16" r="1.5" fill="#FFFFFF"/>'
+        '</svg>'
+    ),
+    "github": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">'
+        '<rect width="48" height="48" rx="10" fill="#24292F"/>'
+        '<path fill="#FFFFFF" d="M24 8C15.2 8 8 15.2 8 24c0 7.1 4.6 13.1 11 15.2.8.1 1.1-.3 1.1-.8v-2.8c-4.5 1-5.4-2.2-5.4-2.2-.7-1.8-1.8-2.3-1.8-2.3-1.5-1 .1-1 .1-1 1.6.1 2.5 1.7 2.5 1.7 1.4 2.5 3.8 1.8 4.7 1.4.1-1.1.6-1.8 1-2.2-3.6-.4-7.3-1.8-7.3-8 0-1.8.6-3.2 1.7-4.3-.2-.4-.7-2.1.2-4.3 0 0 1.4-.4 4.5 1.7 1.3-.4 2.7-.5 4.1-.5s2.8.2 4.1.5c3.1-2.1 4.5-1.7 4.5-1.7.9 2.2.4 3.9.2 4.3 1.1 1.1 1.7 2.5 1.7 4.3 0 6.2-3.8 7.6-7.4 8 .6.5 1.1 1.5 1.1 3v4.4c0 .5.3.9 1.1.8C35.4 37.1 40 31.1 40 24c0-8.8-7.2-16-16-16z"/>'
+        '</svg>'
+    ),
+}
+
+
+def get_official_brand_icon_base64(name: str | None) -> str | None:
+    """根据应用名称或别名，获取官方原版 100% 精确的彩色矢量 Logo Data URL。"""
+    if not name:
+        return None
+    key = name.strip().lower()
+    if key in OFFICIAL_BRAND_SVG_ICONS:
+        svg = OFFICIAL_BRAND_SVG_ICONS[key]
+        b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        return f"data:image/svg+xml;base64,{b64}"
+    stem = Path(key).stem.lower()
+    if stem in OFFICIAL_BRAND_SVG_ICONS:
+        svg = OFFICIAL_BRAND_SVG_ICONS[stem]
+        b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        return f"data:image/svg+xml;base64,{b64}"
+    return None
 
 
 def _normalize_exe_name(exe_name: str, exe_path: str = "") -> str:
@@ -596,32 +751,214 @@ def extract_exe_icon_base64(
     return _build_svg_fallback_data_url(fallback_label, category)
 
 
-def resolve_app_metadata(exe_path: str, exe_name: str | None = None) -> dict:
+def extract_window_icon_base64(hwnd: int) -> str | None:
+    """直接从运行中的前台窗口句柄 (HWND) 提取真实运行图标（兼容 PWA 及动态窗口）。"""
+    if not HAS_WIN32 or not hwnd or hwnd <= 0:
+        return None
+    try:
+        # 1. 尝试 WM_GETICON (ICON_BIG, ICON_SMALL2, ICON_SMALL)
+        for icon_type in (win32con.ICON_BIG, 2, win32con.ICON_SMALL):
+            try:
+                res, hicon = win32gui.SendMessageTimeout(
+                    hwnd,
+                    win32con.WM_GETICON,
+                    icon_type,
+                    0,
+                    win32con.SMTO_ABORTIFHUNG,
+                    150,
+                )
+                if res and hicon:
+                    data_url = _hicon_to_png_data_url(int(hicon), size=32)
+                    if data_url:
+                        return data_url
+            except Exception:
+                pass
+
+        # 2. 尝试 GetClassLong (GCL_HICON, GCL_HICONSM)
+        for flag in (win32con.GCL_HICON, getattr(win32con, "GCL_HICONSM", -34)):
+            try:
+                hicon = win32gui.GetClassLong(hwnd, flag)
+                if hicon:
+                    data_url = _hicon_to_png_data_url(int(hicon), size=32)
+                    if data_url:
+                        return data_url
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return None
+
+
+_BROWSER_SUFFIXES = (
+    " - google chrome",
+    " - chrome",
+    " - microsoft edge",
+    " - microsoft​ edge",
+    " - edge",
+    " — mozilla firefox",
+    " - mozilla firefox",
+    " - firefox",
+    " - brave",
+    " - vivaldi",
+    " - 360安全浏览器",
+    " - 360极速浏览器",
+    " - qq浏览器",
+    " - 搜狗高速浏览器",
+)
+
+# 常见独立本地 PWA / Web 桌面应用别名映射表（小写关键词 -> 友好官方名称与分类）
+KNOWN_PWA_APPS: list[tuple[str, str, str]] = [
+    ("facebook", "Facebook", "social"),
+    ("tiktok", "TikTok", "entertainment"),
+    ("youtube", "YouTube", "entertainment"),
+    ("instagram", "Instagram", "social"),
+    ("threads", "Threads", "social"),
+    ("twitter", "X", "social"),
+    ("x.com", "X", "social"),
+    ("reddit", "Reddit", "social"),
+    ("whatsapp", "WhatsApp", "social"),
+    ("telegram", "Telegram", "social"),
+    ("discord", "Discord", "social"),
+    ("slack", "Slack", "social"),
+    ("notion", "Notion", "productivity"),
+    ("figma", "Figma", "creative"),
+    ("canva", "Canva", "creative"),
+    ("chatgpt", "ChatGPT", "creative"),
+    ("claude", "Claude", "creative"),
+    ("github", "GitHub", "creative"),
+    ("bilibili", "哔哩哔哩", "entertainment"),
+    ("spotify", "Spotify", "entertainment"),
+    ("netflix", "Netflix", "entertainment"),
+]
+
+
+def clean_standalone_title(title: str) -> str:
+    """从独立窗口标题中提取出核心应用品牌/名称。"""
+    t = (title or "").strip()
+    if not t:
+        return ""
+    t_lower = t.lower()
+    for kw, friendly, _ in KNOWN_PWA_APPS:
+        if kw in t_lower:
+            return friendly
+
+    # 通用截取：例如 "TikTok - Make Your Day" -> "TikTok"
+    for sep in (" - ", " — ", " | ", " · "):
+        if sep in t:
+            parts = [p.strip() for p in t.split(sep) if p.strip()]
+            if parts:
+                return parts[0]
+    return t
+
+
+def inspect_pwa_or_standalone_app(
+    exe_name: str | None,
+    window_title: str | None,
+    window_class: str | None = None,
+    pid: int | None = None,
+) -> tuple[bool, str, str, str, str]:
+    """
+    检查前台窗口是否为由浏览器等宿主承载的独立本地 PWA / Web App 应用。
+    返回 (is_pwa, display_name, exe_name, exe_path, category)
+    """
+    if not exe_name:
+        return False, "", "", "", ""
+    norm_exe = exe_name.strip().lower()
+    is_browser_host = (norm_exe in BROWSER_EXE_NAMES) or (norm_exe in ("msedge_proxy.exe", "chrome_proxy.exe"))
+    if not is_browser_host:
+        return False, "", "", "", ""
+
+    title = (window_title or "").strip()
+    if not title:
+        return False, "", "", "", ""
+
+    title_lower = title.lower()
+    has_browser_suffix = any(title_lower.endswith(sfx) or sfx in title_lower for sfx in _BROWSER_SUFFIXES)
+
+    is_app_mode = False
+    if pid and pid > 0:
+        try:
+            import psutil
+            proc = psutil.Process(pid)
+            cmdline = proc.cmdline()
+            for arg in cmdline:
+                if arg.startswith("--app-id=") or arg.startswith("--app="):
+                    is_app_mode = True
+                    break
+        except Exception:
+            pass
+
+    # 判定为独立应用：
+    # 1. 明确带有 --app-id 或 --app 命令行参数（Chrome/Edge PWA 核心特征）
+    if is_app_mode:
+        for kw, friendly, cat in KNOWN_PWA_APPS:
+            if kw in title_lower:
+                return True, friendly, f"{friendly}.exe", f"PWA:{friendly}", cat
+        cleaned = clean_standalone_title(title)
+        if cleaned and len(cleaned) <= 30 and cleaned.lower() not in ("new tab", "about:blank"):
+            cat = classify_app(cleaned, cleaned, "")
+            return True, cleaned, f"{cleaned}.exe", f"PWA:{cleaned}", cat
+
+    # 2. 或者完全不包含浏览器宿主后缀（如 " - Google Chrome", " - Chrome" 等），
+    #    且标题明确以独立桌面应用名开头或完全等于独立应用名（如 "Facebook", "Facebook - 登录或注册", "TikTok", "TikTok - Make Your Day"）
+    if not has_browser_suffix and (window_class == "Chrome_WidgetWin_1" or not window_class):
+        for kw, friendly, cat in KNOWN_PWA_APPS:
+            if title_lower == kw or title_lower.startswith(f"{kw} ") or title_lower.startswith(f"{kw}-") or title_lower.startswith(f"{kw} -"):
+                return True, friendly, f"{friendly}.exe", f"PWA:{friendly}", cat
+
+    return False, "", "", "", ""
+
+
+def resolve_app_metadata(
+    exe_path: str,
+    exe_name: str | None = None,
+    window_title: str | None = None,
+    hwnd: int | None = None,
+    override_display_name: str | None = None,
+    override_category: str | None = None,
+) -> dict:
     """解析应用完整元数据：exe_path, exe_name, display_name, category, icon_base64。"""
     raw_path = (exe_path or "").strip()
     resolved_exe_name = _normalize_exe_name(exe_name or "", raw_path)
 
     cache_key = f"{raw_path.lower()}|{resolved_exe_name.lower()}"
-    if cache_key in _META_CACHE:
+    if not hwnd and not override_display_name and cache_key in _META_CACHE:
         return dict(_META_CACHE[cache_key])
 
-    catalog_entry = _lookup_catalog(resolved_exe_name)
-    if catalog_entry is not None:
-        display_name, category = catalog_entry
+    if override_display_name:
+        display_name = override_display_name
+        category = override_category or classify_app(resolved_exe_name, display_name, raw_path)
     else:
-        win32_desc = _read_win32_version_display_name(raw_path)
-        if win32_desc:
-            display_name = win32_desc
+        catalog_entry = _lookup_catalog(resolved_exe_name)
+        if catalog_entry is not None:
+            display_name, category = catalog_entry
         else:
-            stem = Path(resolved_exe_name).stem
-            display_name = stem if stem else resolved_exe_name
-        category = classify_app(resolved_exe_name, display_name, raw_path)
+            win32_desc = _read_win32_version_display_name(raw_path)
+            if win32_desc:
+                display_name = win32_desc
+            else:
+                stem = Path(resolved_exe_name).stem
+                display_name = stem if stem else resolved_exe_name
+            haystack = f"{display_name} {window_title or ''}".strip()
+            category = classify_app(resolved_exe_name, haystack, raw_path)
 
-    icon_base64 = extract_exe_icon_base64(
-        raw_path,
-        display_name=display_name,
-        category=category,
-    )
+    icon_base64 = ""
+    # 1. 优先检查官方原版品牌矢量 Logo（如 TikTok, Facebook, YouTube 等），绝对保证图案 100% 真实纯正！
+    official_icon = get_official_brand_icon_base64(display_name) or get_official_brand_icon_base64(resolved_exe_name)
+    if official_icon:
+        icon_base64 = official_icon
+
+    # 2. 其次若未匹配官方矢量且有运行中前台 HWND，尝试从运行时窗口抓取图标
+    if not icon_base64 and hwnd and hwnd > 0:
+        icon_base64 = extract_window_icon_base64(hwnd) or ""
+
+    # 3. 再次从 EXE 本地提取或 SVG 兜底
+    if not icon_base64:
+        icon_base64 = extract_exe_icon_base64(
+            raw_path,
+            display_name=display_name,
+            category=category,
+        )
 
     result = {
         "exe_path": raw_path,

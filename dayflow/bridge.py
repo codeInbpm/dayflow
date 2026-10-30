@@ -693,20 +693,87 @@ class DayflowBridge:
         return saved
 
     def export_usage_report(
-        self, date_str: str | None = None, period: str = "day"
+        self,
+        date_str: str | None = None,
+        period: str = "day",
+        output_dir: str | Path | None = None,
     ) -> dict[str, Any]:
-        """导出规范详细的 CSV 使用时间明细报表（包含明确的 1 级、2 级分类）。"""
+        """导出规范详细的 Excel (.xlsx) 使用时间明细报表（包含一级/二级分类、自适应舒展列宽与马卡龙配色）。"""
         self.tracker.flush()
         target_date = date_str or datetime.now().strftime("%Y-%m-%d")
-        csv_text = self.db.export_usage_csv_text(target_date, period=period)
-        filename = f"Dayflow_{period}_{target_date}.csv"
+        norm_period = period if period in ("day", "week", "month") else "day"
+
+        # 1. 生成精美的 Excel 二进制数据与 CSV 兼容文本
+        excel_bytes = self.db.export_usage_excel_bytes(target_date, period=norm_period)
+        csv_text = self.db.export_usage_csv_text(target_date, period=norm_period)
+        default_filename = f"Dayflow_{norm_period}_{target_date}.xlsx"
+
+        # 2. 默认推荐初始目录：系统 Downloads 下载文件夹
+        if output_dir:
+            download_dir = Path(output_dir)
+        else:
+            download_dir = Path(os.path.expanduser("~/Downloads"))
+            if not download_dir.exists():
+                download_dir = Path(os.path.expanduser("~/Desktop"))
+            if not download_dir.exists():
+                download_dir = Path(".")
+
+        win = self._get_window()
+        chosen_path: str | None = None
+
+        # 3. 若处于桌面 GUI 环境，弹出 Windows 原生文件另存为对话框让用户自主选择位置
+        if win is not None and hasattr(win, "create_file_dialog"):
+            try:
+                import webview
+                dialog_type = getattr(getattr(webview, "FileDialog", None), "SAVE", getattr(webview, "SAVE_DIALOG", 30))
+                file_types = ("Excel 工作簿 (*.xlsx)", "所有文件 (*.*)")
+                dialog_res = win.create_file_dialog(
+                    dialog_type=dialog_type,
+                    directory=str(download_dir.resolve()),
+                    save_filename=default_filename,
+                    file_types=file_types,
+                )
+                if not dialog_res:
+                    # 用户点击了“取消”
+                    return {
+                        "ok": True,
+                        "success": True,
+                        "cancelled": True,
+                        "message": "用户取消了导出操作",
+                        "csv_text": csv_text,
+                    }
+                chosen_path = dialog_res[0] if isinstance(dialog_res, (list, tuple)) else str(dialog_res)
+            except Exception:
+                chosen_path = None
+
+        # 4. 若无窗口环境（如单测或静默导出）或对话框异常，回退至默认下载路径
+        if not chosen_path:
+            chosen_path = str((download_dir / default_filename).resolve())
+
+        if not chosen_path.lower().endswith(".xlsx"):
+            chosen_path += ".xlsx"
+
+        out_file = Path(chosen_path)
+        try:
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            out_file.write_bytes(excel_bytes)
+        except (PermissionError, OSError):
+            import tempfile
+            out_file = Path(tempfile.gettempdir()) / default_filename
+            out_file.write_bytes(excel_bytes)
+
         row_count = csv_text.count("\n")
+
         return {
             "ok": True,
             "success": True,
-            "filename": filename,
-            "csv_text": csv_text,
+            "cancelled": False,
+            "filename": out_file.name,
+            "saved_path": str(out_file.resolve()),
             "row_count": row_count,
+            "period": norm_period,
+            "target_date": target_date,
+            "csv_text": csv_text,
         }
 
     def check_and_heal_autostart_path(self) -> bool:
